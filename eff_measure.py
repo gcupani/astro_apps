@@ -6,6 +6,7 @@
 # ------------------------------------------------------------------------------
 # Sample run:
 # > python eff_measure.py -h         // Help
+# > python ~/Devel/astro_apps/eff_measure.py -l=eff_measure_list.dat -c=/data/cupani/ESPRESSO/utils/ -s=1 -d=0       // Measure efficiency from COM4UT standards
 # ------------------------------------------------------------------------------
 
 import argparse
@@ -21,7 +22,8 @@ def binspec(wave, flux, bins=np.arange(360.0, 800.0, 16.0)*u.nm,
     bin_spec = []
     for b in bins:
         where = np.where(np.logical_and(wave > b-binsize/2, wave < b+binsize/2))
-        bin_spec.append(np.median(flux[where])*len(flux[where]))
+        bin_spec.append(np.sum(flux[where]))
+        #bin_spec.append(np.median(flux[where])*len(flux[where]))
     return np.array(bin_spec)
 
 def run(**kwargs):
@@ -70,7 +72,7 @@ def run(**kwargs):
         ax.append(fig.add_subplot(211))
         ax.append(fig.add_subplot(212))
         ax[0].semilogy(bins, bin_flux, c='C0', label="ESPRESSO")
-        ax[0].semilogy(spec.wave, spec.flux, c='black', label="ESPRESSO")        
+        #ax[0].semilogy(spec.wave, spec.flux, c='black', label="ESPRESSO")
         ax[0].semilogy(bins, bin_std_ext, c='C2', label="catalogue")
         ax[0].set_xlabel("Wavelength (nm)")
         ax[0].set_ylabel("Photons")
@@ -82,13 +84,13 @@ def run(**kwargs):
             ax[1].plot(eff.wave, eff_airm, c='black', linestyle=':',
                             label="DRS/airmass")
         ax[1].set_xlabel("Wavelength (nm)")
-        ax[1].set_xlabel("Efficiency")    
+        ax[1].set_ylabel("Efficiency")    
         ax[1].legend()
         if show:
             plt.show()
             
         if save:
-            #plt.savefig(filename=f[:-10]+'_eff.pdf', format='pdf')
+            plt.savefig(filename=f[:-10]+'_eff.pdf', format='pdf')
 
             # Save results
             hdu0 = fits.PrimaryHDU(header=spec.hdul[0].header)
