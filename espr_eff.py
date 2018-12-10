@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------
 # ESPR_EFF
 # Measure the efficiency of ESPRESSO from reduced standard stars
-# v1.1 - 2018-12-06
+# v1.2 - 2018-12-06
 # Guido Cupani - INAF-OATs
 # ------------------------------------------------------------------------------
 # Sample run:
@@ -12,10 +12,13 @@
 import argparse
 from astropy import units as u
 from astropy.io import ascii, fits
+from astropy.time import Time
 from formats import ESOExt, ESOStd, EsprEff, EsprS1D
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from plots import Plot21
 import numpy as np
+from scipy.signal import savgol_filter as sg
 
 def binspec(wave, flux, bins=np.arange(360.0, 800.0, 1.6)*u.nm,
             binsize=1.6*u.nm):
@@ -39,7 +42,11 @@ def run(**kwargs):
     plotf = kwargs['plot']
     save = bool(kwargs['save'])
     
-    figg = plt.figure(figsize=(7,7))
+    figg = plt.figure(figsize=(7,9))
+    gs = gridspec.GridSpec(3, 1)
+    axg = []
+    axg.append(figg.add_subplot(gs[0:2]))
+    axg.append(figg.add_subplot(gs[2]))
     color = -1
     targ = ''
     for f in frames:
@@ -47,6 +54,16 @@ def run(**kwargs):
     
         # Load observed spectrum
         spec = EsprS1D(f)
+
+        # Convert to electons
+        spec.adu_to_electron()
+        
+        # Load extinction
+        ext = ESOExt(cal+'atmoexan.fits')
+
+        # Correct observed spectrum for extinction
+        la_silla_spec = np.interp(spec.wave, ext.wave, ext.la_silla)
+        spec.flux = spec.flux * 10 ** (0.4*la_silla_spec*(spec.airm-1))
 
         # Load pipeline efficiency
         try:
@@ -59,34 +76,31 @@ def run(**kwargs):
         std = ESOStd(cal+'f'+spec.targ.lower()+'.dat', area=spec.area,
                      expt=spec.expt)
     
-        # Load extinction
-        ext = ESOExt(cal+'atmoexan.fits')
-
-        # Correct catalogue spectrum for extinction
-        la_silla_interp = np.interp(std.wave, ext.wave, ext.la_silla)
-        std_ext = std.flux * pow(10, -0.4*la_silla_interp*(spec.airm-1))
-    
         # Bin spectra and sum counts
-        bins = np.arange(360.0, 800.0, 1.6) * u.nm
-        bin_flux = binspec(spec.wave, spec.flux, bins)
-        bin_std_ext = binspec(std.wave, std_ext, bins)
+        bins = np.arange(378.0, 788.0, 1.6) * u.nm
+        bin_spec = binspec(spec.wave, spec.flux.value, bins)
+        bin_std = binspec(std.wave, std.flux, bins)
 
+        # Smooth the efficiency curve
+        eff_raw = bin_spec/bin_std  
+        eff_raw[np.isnan(eff_raw)] = np.median(eff_raw[~np.isnan(eff_raw)])
+        eff_smooth = sg(eff_raw, 75, 3)
+        
         # Individual plot
         figi = plt.figure(figsize=(7,12))        
         figi.suptitle(f.split('/')[1][:-10]+', '+spec.targ+', '+spec.mode)
         axi = []
         axi.append(figi.add_subplot(211))
         axi.append(figi.add_subplot(212))
-        axg = figg.add_subplot(111)
-        axi[0].semilogy(bins, bin_flux, c='C0', label="ESPRESSO")
-        axi[0].semilogy(bins, bin_std_ext, c='C1', label="catalogue")
+        axi[0].semilogy(bins, bin_spec, c='C0', label="ESPRESSO")
+        axi[0].semilogy(bins, bin_std, c='C1', label="catalogue")
         axi[0].set_xlabel("Wavelength (nm)")
         axi[0].set_ylabel("Photons")
         axi[0].legend()
         if pipe:
             axi[1].plot(eff.wave, eff.eff, c='black', linestyle='--',
                        label="DRS")
-        axi[1].plot(bins, bin_flux/bin_std_ext, c='C2', label="measured")
+        axi[1].plot(bins, eff_smooth, c='C2', label="measured")
         axi[1].set_xlabel("Wavelength (nm)")
         axi[1].set_ylabel("Efficiency")    
         axi[1].legend()
@@ -94,37 +108,75 @@ def run(**kwargs):
         if plotf == 'all':
             plt.draw()
         if save:
-            plt.savefig(filename=f[:-10]+'_eff.pdf', format='pdf')
+            figi.savefig(filename=f[:-10]+'_eff.pdf', format='pdf')
 
             # Save results
             hdu0 = fits.PrimaryHDU(header=spec.hdul[0].header)
             col0 = fits.Column(name='wave', format='D', array=bins)
-            col2 = fits.Column(name='ph_espr', format='D', array=bin_flux)
-            col1 = fits.Column(name='ph_cat', format='D', array=bin_std_ext)
-            col3 = fits.Column(name='eff', format='D',
-                               array=bin_flux/bin_std_ext)
-            hdu1 = fits.BinTableHDU.from_columns([col0, col1, col2, col3])
+            col1 = fits.Column(name='eff', format='D', array=eff_smooth)
+            hdu1 = fits.BinTableHDU.from_columns([col0, col1])
             hdul = fits.HDUList([hdu0, hdu1])
             hdul.writeto(f[:-10]+'_eff.fits', overwrite=True)
             print "...saved plot/efficiencies as", f[:-10]+'_eff.pdf/fits'+"."
         if plotf != 'all':
             plt.close()
 
-        # Global plot
+        # Compute averages
         if spec.targ != targ:
+            avecomp = f != frames[0]
+            if avecomp:
+                eff_save = eff_stack
+                avecolor = color
+                avetarg = targ
+                avetime = str(Time(np.average(midtime_arr), format='mjd').isot)
+                aveiq = "%3.2f" % np.average(iq_arr)
+            eff_stack = eff_smooth
+            midtime_arr = [spec.midtime.mjd]
+            binx_arr = [spec.binx]
+            iq_arr = [spec.dimm]
             targ = spec.targ
             color += 1
-            axg.plot(bins, bin_flux/bin_std_ext, c='C'+str(color), label=targ)
         else:
-            axg.plot(bins, bin_flux/bin_std_ext, c='C'+str(color))
-        axg.set_xlabel("Wavelength (nm)")
-        axg.set_ylabel("Efficiency")
-        axg.legend()
+            eff_stack = np.vstack((eff_stack, eff_smooth))
+            midtime_arr = np.append(midtime_arr, spec.midtime.mjd)
+            binx_arr = np.append(binx_arr, spec.binx)
+            iq_arr = np.append(iq_arr, spec.dimm)
+            avecomp = f == frames[-1]
+            if avecomp:
+                eff_save = eff_stack
+                avecolor = color
+                avetarg = targ
+                avetime = str(Time(np.average(midtime_arr), format='mjd').isot)
+                aveiq = "%3.2f" % np.average(iq_arr)
+
+        # Global plot
+        if avecomp:
+            label = avetarg+', '+spec.date[:10]+', '+avetime+', IQ: '+aveiq
+            eff_ave = np.average(eff_save, axis=0)
+            eff_std = np.std(eff_save, axis=0)
+            if 'eff_ref' not in locals():
+                eff_ref = eff_ave
+            axg[0].plot(bins, eff_ave, c='C'+str(avecolor), label=label)
+            axg[0].fill_between(bins.value, eff_ave-eff_std,
+                                eff_ave+eff_std,
+                                facecolor='C'+str(avecolor), alpha=0.3)
+            axg[1].plot(bins, eff_ave/eff_ref, c='C'+str(avecolor), label=label)
+            axg[1].fill_between(bins.value, (eff_ave-eff_std)/eff_ref,
+                                (eff_ave+eff_std)/eff_ref,
+                                facecolor='C'+str(avecolor), alpha=0.3)
+        axg[0].plot(bins, eff_smooth, c='C'+str(color), linestyle=':')
+        
+    if len(np.unique(binx_arr)) == 1:
+        figg.suptitle(str(spec.binx)+'x'+str(spec.biny))
+    axg[0].set_ylabel("Efficiency")
+    axg[0].legend()
+    axg[1].set_xlabel("Wavelength (nm)")
+    axg[1].set_ylabel("Normalized to reference")
         
     if plotf != 'no':
         plt.show()
     if save:
-        plt.savefig(kwargs['framelist'][:-4]+'_eff.pdf', format='pdf')
+        figg.savefig(kwargs['framelist'][:-4]+'.pdf', format='pdf')
     plt.close()
         
 def main():

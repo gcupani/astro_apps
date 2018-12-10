@@ -1,6 +1,7 @@
 from astropy import units as u
 from astropy.constants import c, h
 from astropy.io import ascii, fits
+from astropy.time import Time, TimeDelta
 import numpy as np
 
 ut_area = (4*u.m)**2 * np.pi
@@ -43,6 +44,10 @@ class ESOSpec(object):
         self.expt = self.hdr['EXPTIME'] * u.s
         self.targ = self.hdr['ESO OBS TARG NAME']
         self.ut = self.hdr['TELESCOP'][-1]
+        self.date = self.hdr['DATE-OBS']
+        start = Time(self.date, format='isot', scale='utc')
+        mid = TimeDelta(self.expt / 2.0, format='sec')
+        self.midtime = start + mid
 
     def save(self, name, dim='1D'):
         save(name, self.hdr, self.wave, self.flux, self.err, dim)
@@ -81,23 +86,31 @@ class EsprSpec(ESOSpec):
         nut = self.hdr['ESO OCS TEL NO']
         self.area = nut * ut_area
 
+        self.ia_fwhmlin = self.hdr['ESO TEL'+str(self.ut)+' IA FWHMLIN']
+        dimm_start = self.hdr['ESO TEL'+str(self.ut)+' AMBI FWHM START']
+        dimm_end = self.hdr['ESO TEL'+str(self.ut)+' AMBI FWHM END']
+        self.dimm = 0.5 * (dimm_start+dimm_end)
         
 class EsprEff(EsprSpec):
-    """ Class for ESPRESSO efficiency spectra """
+    """ Class for ESPRESSO ABS_EFF_RAW_A spectra """
         
     def __init__(self, name):
         super(EsprEff, self).__init__(name) 
 
         self.wave = self.hdul[1].data['wavelength']*0.1 * u.nm
+        self.eff = self.hdul[1].data['efficiency']
+        """
         try:
             self.eff = self.hdul[1].data['raw_efficiency']
         except:
-            self.eff = self.hdul[1].data['efficiency']
-        try:
-            self.eff = self.hdul[1].data['efficiency_interpolated']
-        except:
-            pass
-
+            try:
+                self.eff = self.hdul[1].data['efficiency']
+            except:
+                try:
+                    self.eff = self.hdul[1].data['efficiency_interpolated']
+                except:
+                    pass
+        """
     
 class EsprS1D(EsprSpec):
     """ Class for ESPRESSO S1D spectra """
@@ -106,8 +119,15 @@ class EsprS1D(EsprSpec):
         super(EsprS1D, self).__init__(name) 
 
         self.wave = self.hdul[1].data['wavelength']*0.1 * u.nm
-        self.flux = self.hdul[1].data['flux']
+        self.flux = self.hdul[1].data['flux'] * u.adu
         self.err = self.hdul[1].data['error']
+
+    def adu_to_electron(self):
+        conad = {'blue': 1.09, 'red': 1.12}
+        blue = np.where(self.wave.value < 521.5)
+        red = np.where(self.wave.value > 521.5)
+        self.flux[blue] = self.flux[blue] * conad['blue']
+        self.flux[red] = self.flux[red] * conad['red']
 
 
 class XshSpec(ESOSpec):

@@ -1,7 +1,7 @@
 from astropy import units
 from astropy.constants import c
 from astropy.coordinates import SkyCoord, EarthLocation
-from astropy.time import Time, TimeDelta
+#from astropy.time import Time, TimeDelta
 import barycen
 
 def air_to_vacuum(spec):
@@ -23,9 +23,9 @@ def earth_to_bary(spec, site_name='paranal'):
     site = EarthLocation.of_site(site_name)
     target = SkyCoord(spec.hdr['RA'], spec.hdr['DEC'],
                       unit=(units.hourangle, units.deg), frame='icrs')
-    start_time = Time(spec.hdr['DATE-OBS'], format='isot', scale='utc')
-    midpt = TimeDelta(spec.hdr['EXPTIME'] / 2.0, format='sec')
-    time = start_time + midpt  # time at middle of observation
-    barycor_vel = barycen.compute_barycentric_correction(time, target,
+    #start_time = Time(spec.hdr['DATE-OBS'], format='isot', scale='utc')
+    #midpt = TimeDelta(spec.hdr['EXPTIME'] / 2.0, format='sec')
+    #time = start_time + midpt  # time at middle of observation
+    barycor_vel = barycen.compute_barycentric_correction(spec.midtime, target,
                                                          location=site)
     spec.wave = spec.wave * (1 + barycor_vel/c).value
