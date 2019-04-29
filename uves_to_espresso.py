@@ -5,13 +5,11 @@
 # Guido Cupani - INAF-OATs
 # ------------------------------------------------------------------------------
 
-
 from astropy.io import fits
 import numpy as np
 
-
-names = ['QSO2139bright_5', 'QSO2139bright_6']
-z_em = 2.427
+names = []  # Put filenames here (full paths, comma-separated)
+z_em = 0.0
 for n in names:
     for c in ['BLUE', 'REDL', 'REDU']:
 
@@ -30,16 +28,21 @@ for n in names:
             end = start+naxis1*step
             wave[i,:] = np.arange(start,end,step)[:naxis1]
 
-        flux_out = fits.HDUList([fits.PrimaryHDU(flux, header=flux_frame[0].header)])
-        err_out  = fits.HDUList([fits.PrimaryHDU(err, header=err_frame[0].header)])
-        wave_out = fits.HDUList([fits.PrimaryHDU(wave, header=flux_frame[0].header)])
+        flux_out = fits.HDUList(
+            [fits.PrimaryHDU(flux, header=flux_frame[0].header)])
+        err_out  = fits.HDUList(
+            [fits.PrimaryHDU(err, header=err_frame[0].header)])
+        wave_out = fits.HDUList(
+            [fits.PrimaryHDU(wave, header=flux_frame[0].header)])
 
         flux_out[0].header['ESO PRO CATG'] = "SPEC_FLUX_2D"
         err_out[0].header['ESO PRO CATG'] = "SPEC_FLUXERR_2D"
         wave_out[0].header['ESO PRO CATG'] = "WAVE_MATRIX_FIBER"
         for f in [flux_out, err_out, wave_out]:
             f[0].header['ESO PRO TYPE'] = "REDUCED"
-            f[0].header.insert('HIERARCH ESO PRO TYPE', ('HIERARCH ESO OCS OBJ Z_EM', z_em, 'QSO emission redshift'), after = True)
+            f[0].header.insert('HIERARCH ESO PRO TYPE',
+                ('HIERARCH ESO OCS OBJ Z_EM', z_em, 'QSO emission redshift'),
+                after = True)
         flux_out.writeto(n+'_'+c+'_flux_reformat.fits', overwrite=True)
         err_out.writeto(n+'_'+c+'_err_reformat.fits',  overwrite=True)
         wave_out.writeto(n+'_'+c+'_wave_reformat.fits', overwrite=True)
