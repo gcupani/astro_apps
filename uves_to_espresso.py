@@ -20,6 +20,12 @@ for n in names:
         flux = flux_frame[0].data
         err = err_frame[0].data
         wave = np.empty(np.shape(flux))
+        obj = flux_frame[0].header['OBJECT']
+        date = flux_frame[0].header['DATE-OBS']
+        try:
+            wlen = flux_frame[0].header['ESO INS GRAT1 WLEN']
+        except:
+            wlen = flux_frame[0].header['ESO INS GRAT2 WLEN']
         naxis1 = flux_frame[0].header['NAXIS1']
         naxis2 = flux_frame[0].header['NAXIS2']
         step = flux_frame[0].header['CDELT1']*0.1
@@ -43,6 +49,7 @@ for n in names:
             f[0].header.insert('HIERARCH ESO PRO TYPE',
                 ('HIERARCH ESO OCS OBJ Z_EM', z_em, 'QSO emission redshift'),
                 after = True)
-        flux_out.writeto(n+'_'+c+'_flux_reformat.fits', overwrite=True)
-        err_out.writeto(n+'_'+c+'_err_reformat.fits',  overwrite=True)
-        wave_out.writeto(n+'_'+c+'_wave_reformat.fits', overwrite=True)
+        name_out = obj+'_'+date+'_'+wlen
+        flux_out.writeto(name_out+'_flux_reformat.fits', overwrite=True)
+        err_out.writeto(name_out+'_err_reformat.fits',  overwrite=True)
+        wave_out.writeto(name_out+'_wave_reformat.fits', overwrite=True)
