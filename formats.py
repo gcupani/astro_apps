@@ -1,5 +1,6 @@
 from astropy import units as u
 from astropy.constants import c, h
+from astropy.coordinates import SkyCoord, EarthLocation
 from astropy.io import ascii, fits
 from astropy.time import Time, TimeDelta
 import numpy as np
@@ -34,11 +35,11 @@ class ESOExt(object):
         hdul = fits.open(name)
         self.wave = hdul[1].data['LAMBDA']*0.1 * u.nm
         self.la_silla = hdul[1].data['LA_SILLA']
-        
+
 class ESOSpec(object):
     """ Class for ESO science spectra """
-    
-    def __init__(self, name): 
+
+    def __init__(self, name):
         self.hdul = fits.open(name)
         self.hdr = self.hdul[0].header
         self.expt = self.hdr['EXPTIME'] * u.s
@@ -51,13 +52,13 @@ class ESOSpec(object):
 
     def save(self, name, dim='1D'):
         save(name, self.hdr, self.wave, self.flux, self.err, dim)
-        
+
 class ESOStd(object):
     """ Class for ESO standard star catalogue spectra """
 
     def __init__(self, name, area=ut_area, expt=3600*u.s):
         """ Load a spectrum """
-    
+
         data = ascii.read(name)
         self.wave = data['col1'] * 0.1 * u.nm
         self.dwave = data['col4'] * 0.1 * u.nm
@@ -68,7 +69,7 @@ class EsprSpec(ESOSpec):
     """ Class for generic ESPRESSO spectra """
 
     def __init__(self, name):
-        super(EsprSpec, self).__init__(name) 
+        super(EsprSpec, self).__init__(name)
 
         self.binx = self.hdr['ESO DET BINX']
         self.biny = self.hdr['ESO DET BINY']
@@ -90,33 +91,22 @@ class EsprSpec(ESOSpec):
         dimm_start = self.hdr['ESO TEL'+str(self.ut)+' AMBI FWHM START']
         dimm_end = self.hdr['ESO TEL'+str(self.ut)+' AMBI FWHM END']
         self.dimm = 0.5 * (dimm_start+dimm_end)
-        
+
 class EsprEff(EsprSpec):
     """ Class for ESPRESSO ABS_EFF_RAW_A spectra """
-        
+
     def __init__(self, name):
-        super(EsprEff, self).__init__(name) 
+        super(EsprEff, self).__init__(name)
 
         self.wave = self.hdul[1].data['wavelength']*0.1 * u.nm
         self.eff = self.hdul[1].data['efficiency']
-        """
-        try:
-            self.eff = self.hdul[1].data['raw_efficiency']
-        except:
-            try:
-                self.eff = self.hdul[1].data['efficiency']
-            except:
-                try:
-                    self.eff = self.hdul[1].data['efficiency_interpolated']
-                except:
-                    pass
-        """
-    
+
+
 class EsprS1D(EsprSpec):
     """ Class for ESPRESSO S1D spectra """
 
     def __init__(self, name):
-        super(EsprS1D, self).__init__(name) 
+        super(EsprS1D, self).__init__(name)
 
         self.wave = self.hdul[1].data['wavelength']*0.1 * u.nm
         self.flux = self.hdul[1].data['flux'] * u.adu
@@ -129,27 +119,42 @@ class EsprS1D(EsprSpec):
         self.flux[blue] = self.flux[blue] * conad['blue']
         self.flux[red] = self.flux[red] * conad['red']
 
+class UVESSpec(ESOSpec):
+    """ Class for generic UVES spectra """
 
-class XshSpec(ESOSpec):
-    """ Class for generic X-shooter spectra """
-    
     def __init__(self, name):
-        super(XshSpec, self).__init__(name) 
+        super(UVESSpec, self).__init__(name)
 
         self.crval1 = self.hdr['CRVAL1']
         self.cdelt1 = self.hdr['CDELT1']
         self.naxis1 = self.hdr['NAXIS1']
-    
+
+class UVES2D(UVESSpec):
+    """ Class for 2D UVES spectra """
+
+    def __init__(self, name):
+        super(UVES2D, self).__init__(name)
+
+
+class XshSpec(ESOSpec):
+    """ Class for generic X-shooter spectra """
+
+    def __init__(self, name):
+        super(XshSpec, self).__init__(name)
+
+        self.crval1 = self.hdr['CRVAL1']
+        self.cdelt1 = self.hdr['CDELT1']
+        self.naxis1 = self.hdr['NAXIS1']
+
 class XshMerge(XshSpec):
     """ Class for X-shooter MERGE spectra """
-    
+
     def __init__(self, name):
-        super(XshMerge, self).__init__(name) 
-    
+        super(XshMerge, self).__init__(name)
+
         self.wave = np.arange(self.crval1, self.crval1+self.naxis1*self.cdelt1,
                               self.cdelt1)
         self.flux = self.hdul[0].data
         self.err = self.hdul[1].data
         #if len(self.wave) > len(self.flux):
         self.wave = self.wave[:len(self.flux)]
-        

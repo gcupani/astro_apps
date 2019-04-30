@@ -7,16 +7,16 @@ import barycen
 import numpy as np
 
 def air_to_vacuum(spec):
-    """ Air to vacuum correction 
+    """ Air to vacuum correction
     http://www.astro.uu.se/valdwiki/Air-to-vacuum%20conversion
     """
-    
+
     s = 1e3/spec.wave
     n = 1 + 0.00008336624212083 \
         + 0.02408926869968 / (130.1065924522 - s**2) \
         + 0.0001599740894897 / (38.92568793293 - s**2)
-    spec.wave = spec.wave*n                
-    
+    spec.wave = spec.wave*n
+
 def earth_to_bary(spec, site_name='paranal'):
     """ Earth to barycentric frame correction
     https://github.com/janerigby/jrr/blob/master/barycen.py
@@ -35,7 +35,7 @@ def earth_to_bary(spec, site_name='paranal'):
 def moffat_ee(fwhm=1.0, alpha=3.0, max_aperture=3.0):
     """ Compute the encircled energy for a Moffat profile, given the FWHM """
 
-    # Find the value of Moffat gamma that gives the required FWHM 
+    # Find the value of Moffat gamma that gives the required FWHM
     gamma_arr = np.arange(fwhm*0.5, fwhm*2, fwhm*1e-2)
     m_arr = Moffat2D(1.0, 0.0, 0.0, gamma_arr, alpha)
     gamma = np.interp(fwhm, m_arr.fwhm, gamma_arr)
@@ -58,11 +58,7 @@ def moffat_ee(fwhm=1.0, alpha=3.0, max_aperture=3.0):
         where = x**2 + y**2 < r**2
         m.zin = np.zeros((len(x), len(y)))
         m.zin[where] = m.z[where]
-    
+
         # Compute the encircled energy
         m.ee.append(np.sum(m.zin)/zsum)
     return m
-
-    
-    
-    
