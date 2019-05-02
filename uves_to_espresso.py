@@ -1,17 +1,20 @@
 # ------------------------------------------------------------------------------
 # UVES to ESPRESSO
 # Convert from UVES 2D frames to ESPRESSO 2D frames (suitable for DAS)
-# v2.0 - 2019-04-29
+# v2.1 - 2019-05-02
 # Guido Cupani - INAF-OATs
+# V. D'Odorico - INAF-OATs
 # ------------------------------------------------------------------------------
 
 from astropy.io import fits
 import numpy as np
 
-names = []  # Put filenames here (full paths, comma-separated)
-z_em = 0.0
+names = [] # Put root filenames here (full paths, comma-separated)
+z_em = 0.0 #put redshift of the QSO here
+
 for n in names:
-    for c in ['BLUE', 'REDL', 'REDU']:
+#    for c in ['BLUE', 'REDL', 'REDU']:
+    for c in ['REDL', 'REDU']:
 
         print("Reformatting "+n+", "+c+"...")
 
@@ -20,7 +23,7 @@ for n in names:
         flux = flux_frame[0].data
         err = err_frame[0].data
         wave = np.empty(np.shape(flux))
-        obj = flux_frame[0].header['OBJECT']
+        obj = flux_frame[0].header['ESO OBS TARG NAME']
         date = flux_frame[0].header['DATE-OBS']
         try:
             wlen = flux_frame[0].header['ESO INS GRAT1 WLEN']
@@ -49,7 +52,8 @@ for n in names:
             f[0].header.insert('HIERARCH ESO PRO TYPE',
                 ('HIERARCH ESO OCS OBJ Z_EM', z_em, 'QSO emission redshift'),
                 after = True)
-        name_out = obj+'_'+date+'_'+wlen
+        name_out = obj+'_'+date+'_'+c+str(wlen)
         flux_out.writeto(name_out+'_flux_reformat.fits', overwrite=True)
         err_out.writeto(name_out+'_err_reformat.fits',  overwrite=True)
         wave_out.writeto(name_out+'_wave_reformat.fits', overwrite=True)
+
