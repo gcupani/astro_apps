@@ -56,4 +56,3 @@ for n in names:
         flux_out.writeto(name_out+'_flux_reformat.fits', overwrite=True)
         err_out.writeto(name_out+'_err_reformat.fits',  overwrite=True)
         wave_out.writeto(name_out+'_wave_reformat.fits', overwrite=True)
-

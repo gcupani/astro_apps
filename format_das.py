@@ -145,7 +145,11 @@ class Format():
             if a == 'flux':
                 self.wave = self.create_wave_2d(hdul)
                 self.wave = self.wave*0.1
-        self.arm = self.path_i[-10:-5]  # BLUE, REDL or REDU
+        try:
+            wlen = hdr['ESO INS GRAT1 WLEN']
+        except:
+            wlen = hdr['ESO INS GRAT2 WLEN']
+        self.arm = self.path_i[-10:-5]+'_'+str(wlen)  # BLUE, REDL or REDU
         if self.baryvac_f:
             air_to_vacuum(self)
             self.hdr = hdr
@@ -163,8 +167,7 @@ def run(**kwargs):
 
     frames = np.array(ascii.read(kwargs['framelist'],
                                  format='no_header')['col1'])
-    path_i = kwargs['root']+'from_pipe/'  # Path to the products of the pipeline
-    path_o = kwargs['root']+'to_das/'     # Path to the reformatted frames
+    path_o = kwargs['outdir']     # Path to the reformatted frames
 
     # Create directory for products
     try:
@@ -173,11 +176,11 @@ def run(**kwargs):
         print("Directory "+path_o+" already exists.")
 
     # Loop over frames
-    for f in frames:
-        print("Processing", path_i+f+"...")
+    for path_i in frames:
+        print("Processing", path_i+"...")
 
         # Initialize the format
-        fmt = Format(path_i+f, rv=kwargs['rv'], zem=kwargs['zem'],
+        fmt = Format(path_i, rv=kwargs['rv'], zem=kwargs['zem'],
                      path_o=path_o, baryvac_f=kwargs['baryvac'])
 
         # Convert
@@ -189,9 +192,6 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('-i', '--instr', type=str, default='xsh',
                    help="Instrument ('xsh' or 'uves'; more will come).")
-    p.add_argument('-d', '--root', type=str, default='./',
-                   help="Root directory, where subdirectories input "
-                   "(from_pipe/) and outputs (to_das/) are located.")
     p.add_argument('-l', '--framelist', type=str, default='frame_list.dat',
                    help="List of frames; must be an ascii file with a column "
                    "of entries. X-shooter entries should be filenames of "
@@ -201,6 +201,8 @@ def main():
                    "should be filenames of WCALIB_FF_SCI_POINT frames, "
                    "with 'WCALIB' replaced by '%%s' (to catch both WCALIB and "
                    "WCALIB_ERRORBAR frames).")
+    p.add_argument('-o', '--outdir', type=str, default='./',
+                   help="Output directory.")
     p.add_argument('-r', '--rv', type=float, default=0.0,
                    help="Radial velocity of the target (km/s).")
     p.add_argument('-z', '--zem', type=float, default=0.0,
