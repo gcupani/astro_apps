@@ -11,6 +11,7 @@
 
 import argparse
 from astropy import units as u
+from astropy.constants import c
 from astropy.io import ascii, fits
 from astropy.time import Time, TimeDelta
 from copy import deepcopy as dc
@@ -158,7 +159,9 @@ class Format():
             start = Time(self.date, format='isot', scale='utc')
             mid = TimeDelta(self.expt / 2.0, format='sec')
             self.midtime = start + mid
-            earth_to_bary(self)
+            #earth_to_bary(self)
+            barycor_vel = self.hdr['ESO QC VRAD BARYCOR']*u.km/u.s
+            self.wave = self.wave * (1 + barycor_vel/c).value
         self.convert(hdr)
 
 
