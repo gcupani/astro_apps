@@ -15,13 +15,14 @@ def pad(array, length):
                             constant_values=(-9999.0,-9999.0)) \
                      for a in array])
 
-names = []  # Put filenames here (full paths, comma-separated)
+input = []  # Put filenames here (full paths, comma-separated)
+output = []  # Put name tags here, e.g. QNNNN+NNNN_setup, one per input filename
 flux_col = 'FLUX'
 fluxerr_col = 'FLUXERR'
-for n in names:
-    print("Converting "+n+"...")
+for i, o in zip(input, ouput):
+    print("Converting "+i+" into S2D_"+o+"_n...")
 
-    frame = fits.open(n)
+    frame = fits.open(i)
     data = frame[1].data
     specid = np.unique(data['SPECID'])
     for s in specid:
@@ -47,6 +48,6 @@ for n in names:
         hdu4 = fits.ImageHDU(wavel)
         hdu5 = fits.ImageHDU(wavel)
         hdul = fits.HDUList([hdu0, hdu1, hdu2, hdu3, hdu4, hdu5])
-        name = 'S2D_'+str(s)+'.fits'
+        name = 'S2D_'+o+'_'+str(s)+'.fits'
         hdul.writeto(name, overwrite=True)
         print(" Created frame "+name+".")
