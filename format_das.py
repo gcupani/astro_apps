@@ -142,10 +142,11 @@ class Format():
         for t, a in zip(tag, attr):
             hdul = fits.open(self.path_i % t)
             hdr = dc(hdul[0].header)
-            setattr(self, a, hdul[0].data)
+            setattr(self, a, hdul[0].data[:, 150:-150])
             if a == 'flux':
                 self.wave = self.create_wave_2d(hdul)
                 self.wave = self.wave*0.1
+                self.wave = self.wave[:,150:-150]
         try:
             wlen = hdr['ESO INS GRAT1 WLEN']
         except:

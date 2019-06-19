@@ -19,7 +19,7 @@ input = []  # Put filenames here (full paths, comma-separated)
 output = []  # Put name tags here, e.g. QNNNN+NNNN_setup, one per input filename
 flux_col = 'FLUX'
 fluxerr_col = 'FLUXERR'
-for i, o in zip(input, ouput):
+for i, o in zip(input, output):
     print("Converting "+i+" into S2D_"+o+"_n...")
 
     frame = fits.open(i)
