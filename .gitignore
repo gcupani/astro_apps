@@ -1,2 +1,5 @@
 
 *.fits
+*.numbers
+*.dat
+*.png
