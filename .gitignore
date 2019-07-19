@@ -3,3 +3,5 @@
 *.numbers
 *.dat
 *.png
+*.csv
+*.sh
