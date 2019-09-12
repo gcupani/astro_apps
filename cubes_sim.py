@@ -37,14 +37,14 @@ psf_func = 'gaussian'  # Function to represent the PSF
 psf_sampl = 1000*au.pixel  # Size of the PSF image
 psf_cen = (0,0)  # Center of the PSF
 
-texp = 360*au.s  # Exposure time
-targ_mag = 17  # Magnitude of the target
+texp = 3600*au.s  # Exposure time
+targ_mag = 16  # Magnitude of the target
 bckg_mag = 22.5  # Magnitude of the background
-airmass = 1.5  # Airmass
+airmass = 1.0  # Airmass
 
 spec_func = 'PL'  # Function for the template spectrum or filename
 spec_file = '/Users/guido/GitHub/astrocook/test_data/J1124-1705.fits'
-extr_func = 'opt'  # Function for extracting the spectrum (sum or opt)
+extr_func = 'sum'  # Function for extracting the spectrum (sum or opt)
 
 class CCD(object):
 
@@ -75,7 +75,7 @@ class CCD(object):
 
         self.mod_init = []
         self.sl_cen = []
-        self.sl_hlength = []
+        #self.sl_hlength = []
         for i, (x, m, M, m_d, M_d) in enumerate(zip(
             self.xcens, self.wmins, self.wmaxs, self.wmins_d, self.wmaxs_d)):
             self.arm_counter = i
@@ -83,8 +83,14 @@ class CCD(object):
                                             self.spec.wave.value<M.value)
             self.arm_wave = self.spec.wave[self.arm_range].value
             self.arm_targ = self.spec.targ_loss[self.arm_range].value
-            self.add_slices(xcen=int(x), wmin=m.value, wmax=M.value,
-                            wmin_d=m_d.value, wmax_d=M_d.value)
+            xlength = int(slice_length/self.spat_scale/self.pix_xsize)
+            self.sl_hlength = xlength // 2
+            psf_xlength = int(seeing/self.spat_scale/self.pix_xsize)
+            xspan = xlength + int(slice_gap.value)
+            xshift = (slice_n*xspan+xlength)//2
+            self.add_slices(int(x), xshift, xspan, psf_xlength,
+                            wmin=m.value, wmax=M.value, wmin_d=m_d.value,
+                            wmax_d=M_d.value)
             line, = self.spec.ax.plot(
                 self.arm_wave, self.arm_targ \
                 * self.tot_eff(self.arm_wave, m_d.value, M_d.value), c='C3')
@@ -92,18 +98,24 @@ class CCD(object):
                 line.set_label('On detector')
 
 
-        self.noise = np.sqrt(self.signal+(ccd_ron*ccd_gain).value**2)
+        self.shot = np.sqrt(self.signal)
+        self.noise = np.sqrt(self.shot**2+(ccd_ron*ccd_gain).value**2)
         self.noise_rand = np.random.normal(0, self.noise, self.signal.shape)
 
         self.image = np.round(self.signal + self.noise_rand) #\
                               #+ (ccd_bias*ccd_gain).value)
 
+        """
+        for i, (c, hl) in enumerate(zip(self.sl_cen, self.sl_hlength)):
+            if i == 0:
+                snr = self.signal[:, c-hl:c+hl]/self.noise[:, c-hl:c+hl]
+            else:
+                snr = np.append(snr, self.signal[:, c-hl:c+hl]\
+                                     /self.noise[:, c-hl:c+hl])
+        self.median_snr = np.median(snr)
+        """
 
-    def add_slice(self, trace, length=slice_length,
-                  xcen=None, wmin=None, wmax=None, wmin_d=None, wmax_d=None):
-        if xcen == None:
-            xcen = int(self.ysize.value//2)
-        sl_hlength = int(length/self.spat_scale/self.pix_xsize // 2)
+    def add_slice(self, trace, xcen, wmin, wmax, wmin_d, wmax_d):
 
         if wmin is not None and wmax is not None:
             wave = self.wave_grid(wmin, wmax)
@@ -113,7 +125,7 @@ class CCD(object):
         else:
             norm = self.spec.norm
 
-        sl_trace = self.rebin(trace.value, sl_hlength*2)
+        sl_trace = self.rebin(trace.value, self.sl_hlength*2)
         sl_norm = self.rebin(norm.value, self.ysize.value)
 
         # Efficiency
@@ -121,27 +133,23 @@ class CCD(object):
             sl_norm = sl_norm * self.tot_eff(wave, wmin_d, wmax_d)
 
         signal = np.round(np.multiply.outer(sl_norm, sl_trace))
-        self.signal[:,xcen-sl_hlength:xcen+sl_hlength] = signal
+        self.signal[:,xcen-self.sl_hlength:xcen+self.sl_hlength] = signal
 
-        return sl_hlength, sl_trace, sl_norm, np.mean(signal)
+        #return sl_hlength, sl_trace, sl_norm, np.mean(signal)
+        return sl_trace, sl_norm, np.mean(signal)
 
 
-    def add_slices(self, n=slice_n, length=slice_length, gap=slice_gap,
-                   xcen=None, wmin=None, wmax=None, wmin_d=None, wmax_d=None):
-        if xcen == None:
-            xcen = int(self.ysize.value//2)
-        pix_length = int(length/self.spat_scale/self.pix_xsize)
-        psf_length = int(seeing/self.spat_scale/self.pix_xsize)
-        pix_span = pix_length + int(gap.value)
-        pix_shift = (n*pix_span+pix_length)//2
-        pix_xcens = range(xcen-pix_shift, xcen+pix_shift, pix_span)
-        for c, t in zip(pix_xcens[1:], self.psf.traces):
-            sl_hlength, _, _, mean_signal = self.add_slice(t, length, c, wmin,
-                                                           wmax, wmin_d, wmax_d)
+    def add_slices(self, xcen, xshift, xspan, psf_xlength, wmin, wmax, wmin_d,
+                   wmax_d):
+
+        xcens = range(xcen-xshift, xcen+xshift, xspan)
+        for c, t in zip(xcens[1:], self.psf.traces):
+            _, _, sl_msignal = self.add_slice(t, c, wmin, wmax, wmin_d, wmax_d)
+
             self.mod_init.append(
-                Gaussian1D(amplitude=mean_signal, mean=c, stddev=psf_length))
+                Gaussian1D(amplitude=sl_msignal, mean=c, stddev=psf_xlength))
             self.sl_cen.append(c)
-            self.sl_hlength.append(sl_hlength)
+            #self.sl_hlength.append(sl_hlength)
 
 
     def draw(self, fig):
@@ -155,28 +163,40 @@ class CCD(object):
         self.ax.set_title('CCD')
         self.ax.set_xlabel('X')
         self.ax.set_ylabel('Y')
-        self.ax.text(50, 4000, "Total: %1.3e %s"
+        self.ax.text(100, 4000, "Total: %1.3e %s"
                      % (np.sum(self.signal), au.photon),
                      ha='left', va='bottom', color='white')
+        """
+        self.ax.text(100, 4000, "Median SNR: %2.3f"
+                     % self.median_snr,
+                     ha='left', va='bottom', color='white')
+        """
         fig.colorbar(im, cax=cax, orientation='vertical')
 
     def extr_arms(self, n=3, slice_n=slice_n):
+
+
         for a in range(n):
             wave_extr = self.wave_grid(self.wmins[a], self.wmaxs[a])
             for s in range(slice_n):
                 print("Extracting slice %i of arm %i..." % (s+1, a+1))
                 i = a*slice_n+s
-                x = range(self.sl_cen[i]-self.sl_hlength[i],
-                          self.sl_cen[i]+self.sl_hlength[i])
+                x = range(self.sl_cen[i]-self.sl_hlength,
+                          self.sl_cen[i]+self.sl_hlength)
                 s_extr = np.empty(int(self.ysize.value))
                 n_extr = np.empty(int(self.ysize.value))
                 for p in range(int(self.ysize.value)):
-                    y = self.image[p, self.sl_cen[i]-self.sl_hlength[i]:
-                                      self.sl_cen[i]+self.sl_hlength[i]]
-                    dy = self.noise[p, self.sl_cen[i]-self.sl_hlength[i]:
-                                       self.sl_cen[i]+self.sl_hlength[i]]
+                    y = self.image[p, self.sl_cen[i]-self.sl_hlength:
+                                      self.sl_cen[i]+self.sl_hlength]
+                    b1 = np.mean(self.image[p, self.sl_cen[i]-self.sl_hlength+1:
+                                            self.sl_cen[i]-self.sl_hlength+6])
+                    b2 = np.mean(self.image[p, self.sl_cen[i]+self.sl_hlength-6:
+                                            self.sl_cen[i]+self.sl_hlength-1])
+                    y = y - 0.5*(b1+b2)
+                    dy = self.shot[p, self.sl_cen[i]-self.sl_hlength:
+                                      self.sl_cen[i]+self.sl_hlength]
                     s_extr[p], n_extr[p] = getattr(self, 'extr_'+self.func)\
-                        (y, dy=dy, mod=self.mod_init[i], x=x)
+                        (y, dy=dy, mod=self.mod_init[i], x=x, p=p)
                     #mod_fit = lm()(self.mod_init[i], x, y)
                 if s == 0:
                     flux_extr = s_extr
@@ -185,13 +205,23 @@ class CCD(object):
                     flux_extr += s_extr
                     err_extr = np.sqrt(err_extr**2 + n_extr**2)
 
-            fluxd_extr = flux_extr / np.append(0, wave_extr[1:]-wave_extr[:-1])
-            line = self.spec.ax.scatter(wave_extr, fluxd_extr, s=2, c='C0')
+            dw = (wave_extr[2:]-wave_extr[:-2])*0.5
+            dw = np.append(dw[:1], dw)
+            dw = np.append(dw, dw[-1:])
+            flux_extr = flux_extr / dw#np.append(1, wave_extr[1:]-wave_extr[:-1])
+            err_extr = err_extr / dw#np.append(1, wave_extr[1:]-wave_extr[:-1])
+            line = self.spec.ax.scatter(wave_extr, flux_extr, s=2, c='C0')
 
             if a == 0:
                 axt = self.spec.ax.twinx()
                 axt.set_ylabel('SNR per pixel')
 
+            #print(err_extr)
+            #print(np.median(err_extr))
+            #print(np.sqrt(np.mean(np.square(flux_extr[3000:3100]-np.mean(flux_extr[3000:3100])))))
+
+            no_nan = np.logical_and(True,
+                                    True)
             wave_snr = wave_extr[::200]
             snr = cspline(wave_extr, flux_extr/err_extr)(wave_snr)
             linet = axt.scatter(wave_snr, snr, s=4, c='black')
@@ -208,26 +238,58 @@ class CCD(object):
     def extr_sum(self, y, dy, **kwargs):
         s = np.sum(y)
         n = np.sqrt(np.sum(dy**2))
-        return s, n
-
-    def extr_ave(self, y, dy, **kwargs):
-        s, sw = np.average(y, weights=dy, returned=True)
-        #s = s*sw * np.sum(y)/np.sum(s)
-        if np.sum(s) > 0:
-            s = s * np.sum(y)/np.sum(s)
-        n = np.sqrt(np.sum(dy**2))
-        return s, n
-
-    def extr_opt(self, y, dy, mod, x):
-        mod_fit = lm()(mod, x, y)(x)
-        #mod_fit = mod(x)
-        if (np.sum(mod_fit) > 0):
-            s, sw = np.average(y, weights=mod_fit/dy, returned=True)
-            if np.sum(s) > 0:
-                s = s * np.sum(y)/np.sum(s)
+        if s != 0 and False:
+            fact = np.sum(y)/s
         else:
-            s = np.sum(y)
-        n = np.sqrt(np.sum(dy**2))
+            fact = 1.0
+        s = s * fact
+        n = n * fact
+        return s, n
+
+    def extr_wgh(self, y, dy, **kwargs):
+        w = np.ones(dy[dy>0].shape)
+        w = 1/dy[dy>0]**2
+        #w = w/np.mean(w)
+        if len(w) > 0:
+            s = np.average(y[dy>0], weights=w)
+            n = np.sqrt(1/np.sum(w)**2)
+        else:
+            s = 0.0
+            n = 1.0
+
+        if np.sum(s) > 0:
+            fact = np.sum(y)/np.sum(s)
+        else:
+            fact = 1.0
+        s = s * fact
+        n = n * fact
+        return s, n
+
+    def extr_opt(self, y, dy, mod, x, p):
+        mod_fit = lm()(mod, x, y)(x)
+        mod_fit[mod_fit < 1e-3] = 0
+        if np.sum(mod_fit*dy) > 0 and not np.isnan(mod_fit).any():
+            mod_norm = mod_fit/np.sum(mod_fit)
+            #print(mod_fit)
+            w = dy>0
+            s = np.sum(mod_norm[w]*y[w]/dy[w]**2)/np.sum(mod_norm[w]**2/dy[w]**2)
+            n = np.sqrt(np.sum(mod_norm[w])/np.sum(mod_norm[w]**2/dy[w]**2))
+        else:
+            s = 0
+            n = 1
+        if np.isnan(s) or np.isnan(n) or np.isinf(s) or np.isinf(n) \
+            or np.abs(s) > 1e30 or np.abs(n) > 1e30:
+            print(p, mod_fit[w], mod_norm[w], dy[w], y[w], s, n)
+            s = 0
+            n = 1
+        #print(s/n)
+        if p > 2000:
+            print(s,n, np.sum(y),np.sqrt(np.sum(dy**2)))
+            print(s/n, np.sum(y)/np.sqrt(np.sum(dy**2)))
+            fig, ax = plt.subplots()
+            ax.plot(x, y)
+            ax.plot(x, mod_fit)
+            plt.show()
         return s, n
 
     def rebin(self, arr, length):
@@ -279,7 +341,7 @@ class Photons(object):
 
 class PSF(object):
 
-    def __init__(self, spec, xsize=seeing*3, ysize=seeing*3,
+    def __init__(self, spec, xsize=slice_length, ysize=slice_length,
                  sampl=psf_sampl, func=psf_func):
         #self.phot = phot
         self.spec = spec
@@ -448,10 +510,11 @@ class Spec(object):
 
         # Extrapolate extinction
         spl = cspline(self.phot.atmo_wave, self.phot.atmo_ex)(self.wave)
-        self.atmo_ex = pow(10, -0.4*spl*(airmass-1))
+        #self.atmo_ex = pow(10, -0.4*spl*(airmass-1))
+        self.atmo_ex = pow(10, -0.4*spl*airmass)
 
-        getattr(self, func)()  # Apply the chosen function for the spectrum
-
+        flux = getattr(self, func)()  # Apply the chosen function for the spectrum
+        self.normalize(flux)
 
     def draw(self, fig=None):
         if fig is None:
@@ -465,22 +528,33 @@ class Spec(object):
         self.ax.set_ylabel('Flux density (%s)' % self.targ.unit)
         #self.ax.set_yscale('log')
 
-    def PL(self, index=-2):
-        flux = (self.wave.value/600)**index * self.atmo_ex # Normalized @ 600 nm
-        self.norm = flux/np.sum(flux) / au.nm
-        #self.targ = self.norm * self.psf.targ_tot * au.photon
-        #self.targ = self.norm * self.phot.targ * au.nm
-        self.targ = flux * self.phot.targ
-        self.targ_int = np.sum(self.targ)/len(self.targ.value) \
-                        * (self.wmax-self.wmin)
-
-
     def file(self, name=spec_file):
         data = fits.open(name)[1].data
         data = data[np.logical_and(data['wave']*0.1 > self.wmin.value,
                                    data['wave']*0.1 < self.wmax.value)]
         self.wave = data['wave']*0.1 * au.nm
         self.norm = data['flux'] * au.photon/au.nm
+
+    def flat(self):
+        return np.ones(self.wave.shape) * self.atmo_ex
+
+    def normalize(self, flux):
+        self.norm = flux/np.sum(flux) / au.nm
+        self.targ = flux * self.phot.targ
+        self.targ_int = np.sum(self.targ)/len(self.targ.value) \
+                        * (self.wmax-self.wmin)
+
+    def PL(self, index=-2):
+        return (self.wave.value/600)**index * self.atmo_ex # Normalized @ 600 nm
+        """
+        self.norm = flux/np.sum(flux) / au.nm
+        #self.targ = self.norm * self.psf.targ_tot * au.photon
+        #self.targ = self.norm * self.phot.targ * au.nm
+        self.targ = flux * self.phot.targ
+        self.targ_int = np.sum(self.targ)/len(self.targ.value) \
+                        * (self.wmax-self.wmin)
+        """
+
 
 def main():
 
