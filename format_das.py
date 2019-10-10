@@ -100,7 +100,7 @@ class Format():
         return wave
 
     def xsh(self):
-        """ Extract data in X-shooter MERGE1D format """
+        """ Extract data in X-shooter pipeline MERGE1D format """
 
         hdul = fits.open(self.path_i)
         hdr = dc(hdul[0].header)
@@ -118,6 +118,20 @@ class Format():
             hdr['HIERARCH ESO DET BINX'] = 2
 
         self.convert(hdr)
+
+    def xsh_reduce(self):
+        """ Extract data in xshooter_reduce ARM/ARMe format """
+
+        hdul = fits.open(self.path_i)
+        hdul_e = fits.open(self.path_i[:-5]+'e.fits')
+        hdr = dc(hdul[0].header)
+        self.wave = self.create_wave(hdul)
+        self.flux = hdul[0].data
+        self.err = hdul_e[0].data
+        self.arm = self.path_i[-9:-5]  # UVB, VIS or NIR
+
+        self.convert(hdr)
+
 
     def uves(self):
         """ Extract data in UVES RED/ERRORBAR format """

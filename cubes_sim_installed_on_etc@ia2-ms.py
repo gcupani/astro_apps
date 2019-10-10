@@ -12,6 +12,8 @@ from astropy import units as au
 from astropy.io import ascii, fits
 from astropy.modeling.fitting import LevMarLSQFitter as lm
 from astropy.modeling.functional_models import Gaussian1D, Gaussian2D, Moffat2D
+import matplotlib
+matplotlib.use('agg')
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -316,7 +318,7 @@ class Photons(object):
         self.atmo()
 
     def atmo(self):
-        data = fits.open('atmoexan.fits')[1].data
+        data = fits.open('database/atmoexan.fits')[1].data
         self.atmo_wave = data['LAMBDA']*0.1 * au.nm
         self.atmo_ex = data['LA_SILLA']
 
@@ -552,7 +554,7 @@ class Spec(object):
             name = star_file
         else:
             name = self.file
-        data = ascii.read(name)#name)
+        data = ascii.read(name, data_start=2, names=['col1', 'col2'])#name)
         wavef = data['col1']*0.1 * au.nm
         fluxf = data['col2']
         spl = cspline(wavef, fluxf)(self.wave.value)
