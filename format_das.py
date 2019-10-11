@@ -57,6 +57,8 @@ class Format():
         # Corresponding data
         data = [self.wave, self.flux, self.err]
 
+        # Old style: three separate frames
+        """
         for t, d in zip(tag, data):
 
             # Add required ESPRESSO keywords to the header
@@ -72,6 +74,30 @@ class Format():
             name = self.prefix+'_'+t+'.fits'
             hdul.writeto(name, overwrite=True, checksum=True)
             print("...saved %-17s" % t, "as", name+".")
+        """
+
+        # New style: single multi-extension frame
+        hdr['HIERARCH ESO QC CCF RV'] = self.rv
+        hdr['HIERARCH ESO OCS OBJ Z EM'] = self.zem
+        hdr['HIERARCH ESO DAS Z_EM'] = self.zem
+        hdr['HIERARCH ESO PRO CATG'] = 'S2D_A'
+        try:
+            # NIR frames from xshooter_reduce have this faulty keyword
+            del hdr['HIERARCH ESO DET CHIP PXSPACE']
+        except:
+            pass
+
+        #print(hdr)
+
+        hdu0 = fits.PrimaryHDU([], header=hdr)
+        hdu1 = fits.ImageHDU([self.flux], name='SCIDATA')
+        hdu2 = fits.ImageHDU([self.err], name='ERRDATA')
+        hdu3 = fits.ImageHDU([np.zeros(self.flux.shape)], name='QUALDATA')
+        hdu4 = fits.ImageHDU([self.wave], name='WAVEDATA_VAC_BARY')
+        hdul = fits.HDUList([hdu0, hdu1, hdu2, hdu3, hdu4])
+        name = self.prefix+'.fits'
+        hdul.writeto(name, overwrite=True, checksum=True)
+        print("...saved S2D multi-extension frame as", name+".")
 
     def create_wave(self, hdul):
         """ Create wavelength array from CRVAL1 and CDELT1 """
