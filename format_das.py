@@ -48,6 +48,8 @@ class Format():
         # Adjust prefix
         if self.prefix == None:
             self.prefix = hdr['ESO OBS TARG NAME']+'_'+hdr['DATE-OBS']+self.arm
+        else:
+            self.prefix = self.prefix+self.arm
         if self.path_o != None:
             self.prefix = self.path_o+self.prefix
 
@@ -211,7 +213,10 @@ def run(**kwargs):
 
     frames = np.array(ascii.read(kwargs['framelist'],
                                  format='no_header')['col1'])
-    path_o = kwargs['outdir']     # Path to the reformatted frames
+    path_o = kwargs['outdir']
+    prefix = kwargs['prefix']
+    if prefix == 'None':
+        prefix = None
 
     # Create directory for products
     try:
@@ -225,7 +230,7 @@ def run(**kwargs):
 
         # Initialize the format
         fmt = Format(path_i, rv=kwargs['rv'], zem=kwargs['zem'],
-                     path_o=path_o, baryvac_f=kwargs['baryvac'])
+                     path_o=path_o, prefix=prefix, baryvac_f=kwargs['baryvac'])
 
         # Convert
         getattr(fmt, kwargs['instr'])()
@@ -247,6 +252,8 @@ def main():
                    "WCALIB_ERRORBAR frames).")
     p.add_argument('-o', '--outdir', type=str, default='./',
                    help="Output directory.")
+    p.add_argument('-p', '--prefix', type=str, default='None',
+                   help="Prefix of the output file(s).")
     p.add_argument('-r', '--rv', type=float, default=0.0,
                    help="Radial velocity of the target (km/s).")
     p.add_argument('-z', '--zem', type=float, default=0.0,
