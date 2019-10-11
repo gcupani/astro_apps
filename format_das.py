@@ -82,7 +82,9 @@ class Format():
         hdr['HIERARCH ESO QC CCF RV'] = self.rv
         hdr['HIERARCH ESO OCS OBJ Z EM'] = self.zem
         hdr['HIERARCH ESO DAS Z_EM'] = self.zem
+        hdr['HIERARCH ESO PRO TYPE'] = 'REDUCED'
         hdr['HIERARCH ESO PRO CATG'] = 'S2D_A'
+        hdr['HIERARCH ESO PRO REC1 PIPE ID'] = 'espdr'
         try:
             # NIR frames from xshooter_reduce have this faulty keyword
             del hdr['HIERARCH ESO DET CHIP PXSPACE']
@@ -101,7 +103,7 @@ class Format():
         hdul.writeto(name, overwrite=True, checksum=True)
         print("...saved S2D multi-extension frame as", name+".")
 
-    def create_wave(self, hdul):
+    def create_wave(self, hdul, log=False, A_to_nm=False):
         """ Create wavelength array from CRVAL1 and CDELT1 """
 
         start = hdul[0].header['CRVAL1']
@@ -112,6 +114,10 @@ class Format():
             wave = wave[:len(hdul[1].data)]
         except:
             wave = wave[:len(hdul[0].data)]
+        if log:
+            wave = 10**wave
+        if A_to_nm:
+            wave = wave*0.1
         return wave
 
     def create_wave_2d(self, hdul):
@@ -153,7 +159,7 @@ class Format():
         hdul = fits.open(self.path_i)
         hdul_e = fits.open(self.path_i[:-5]+'e.fits')
         hdr = dc(hdul[0].header)
-        self.wave = self.create_wave(hdul)
+        self.wave = self.create_wave(hdul, log=True)
         self.flux = hdul[0].data
         self.err = hdul_e[0].data
         self.arm = self.path_i[-9:-5]  # UVB, VIS or NIR
@@ -172,7 +178,7 @@ class Format():
             setattr(self, a, hdul[0].data)
             if a == 'flux':
                 self.wave = self.create_wave(hdul)
-                self.wave = self.wave*0.1
+                #self.wave = self.wave*0.1
         self.arm = self.path_i[-10:-5]  # BLUE, REDL or REDU
         self.convert(hdr)
 
@@ -187,7 +193,7 @@ class Format():
             setattr(self, a, hdul[0].data[:, 150:-150])
             if a == 'flux':
                 self.wave = self.create_wave_2d(hdul)
-                self.wave = self.wave*0.1
+                #self.wave = self.wave*0.1
                 self.wave = self.wave[:,150:-150]
         try:
             wlen = hdr['ESO INS GRAT1 WLEN']
