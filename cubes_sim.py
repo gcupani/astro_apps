@@ -5,13 +5,17 @@
 # Guido Cupani - INAF-OATs
 # ------------------------------------------------------------------------------
 # Sample run:
-# > python cubes_sim.py
+# > python cubes_sim.py J1124-1705.fits 17 22.5 0.7 0.25 10.0 3600 cubes_sim.png
 # ------------------------------------------------------------------------------
 
+from cubes_sim_config import *
 from astropy import units as au
 from astropy.io import ascii, fits
 from astropy.modeling.fitting import LevMarLSQFitter as lm
 from astropy.modeling.functional_models import Gaussian1D, Gaussian2D, Moffat2D
+import matplotlib
+#matplotlib.use('agg')
+from matplotlib import gridspec
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -21,67 +25,25 @@ from scipy.ndimage import gaussian_filter, interpolation
 from scipy.special import expit
 import sys
 
-# See http://www.astronomy.ohio-state.edu/~martini/usefuldata.html
-wave_U = 360 * au.nm  # Effective wavelength, U band
-wave_u = 356 * au.nm  # Effective wavelength, u band
-flux_U = 7561 * au.photon / au.cm**2 / au.s / au.nm  # Flux density @ 360.0 nm, mag_U = 0 (Vega)
-flux_u = 15393 * au.photon / au.cm**2 / au.s / au.nm  # Flux density @ 356.0 nm, mag_u = 0 (AB)
-
-eff_adc = [0.96, 0.96, 0.96]  # ADC efficiency
-eff_slc = [0.98, 0.98, 0.98]  # Slicer efficiency
-eff_dch = [0.96, 0.96, 0.96]  # Dichroics efficiency
-eff_spc = [0.93, 0.94, 0.93]  # Spectrograph efficiency
-eff_grt = [0.90, 0.90, 0.90]  # Grating efficiency
-eff_ccd = [0.85, 0.85, 0.85]  # CCD QE
-eff_tel = [0.72, 0.72, 0.72]  # Telescope efficiency
-resol = [2.0e4, 2.1e4, 2.2e4]  # Instrument resolution
-
-ccd_xsize = 4096*au.pixel  # X size of the CCD
-ccd_ysize = 4096*au.pixel  # Y size of the CCD
-pix_xsize = 15*au.micron  # X size of the pixels
-pix_ysize = 15*au.micron  # Y size of the pixels
-spat_scale = 0.25*au.arcsec/(30*au.micron)  # Spatial scale
-slice_n = 6  # Number of slices
-slice_length = 10*au.arcsec  # Length of the slice
-slice_width = 0.25*au.arcsec  # Width of the slice
-slice_gap = 40*au.pixel  # Length of the slice
-ccd_bias = 100*au.adu
-ccd_ron = 2*au.adu
-ccd_gain = 1*au.photon/au.adu
-
-seeing = 1.0*au.arcsec  # Seeing
-psf_func = 'gaussian'  # Function to represent the PSF ('tophat', 'gaussian', 'moffat')
-psf_sampl = 1000*au.pixel  # Size of the PSF image
-psf_cen = (0,0)  # Center of the PSF
-
-area = (400*au.cm)**2 * np.pi  # Telescope area
-texp = 600*au.s  # Exposure time
-mag_syst = 'AB'  # Magnitude system
-targ_mag = 11.15  # Magnitude of the target @ 350 nm
-bckg_mag = 22.5  # Magnitude of the background @ 350 nm
-airmass = 1.0  # Airmass
-
-spec_func = 'star'  # Function for the template spectrum ('flat', 'PL', 'qso', 'star')
-qso_file = 'J1124-1705.fits'
-star_file = 'Castelliap000T5250g45.dat'
-extr_func = 'sum'  # Function for extracting the spectrum ('sum', 'opt')
-snr_sampl = 50  # Data points per SNR point
-
 
 class CCD(object):
 
     def __init__(self, psf, spec, xsize=ccd_xsize, ysize=ccd_ysize,
+                 xbin=ccd_xbin, ybin=ccd_ybin,
                  pix_xsize=pix_xsize, pix_ysize=pix_ysize,
                  spat_scale=spat_scale, slice_n=slice_n, func=extr_func):
         self.psf = psf
         self.spec = spec
-        self.xsize = xsize
-        self.ysize = ysize
-        self.pix_xsize = pix_xsize
-        self.pix_ysize = pix_ysize
+        self.xsize = xsize/xbin
+        self.ysize = ysize/ybin
+        self.xbin = xbin
+        self.ybin = ybin
+        self.npix = xbin*ybin
+        self.pix_xsize = pix_xsize*xbin
+        self.pix_ysize = pix_ysize*ybin
         self.spat_scale = spat_scale
 
-        self.signal = np.zeros((int(xsize.value), int(ysize.value)))
+        self.signal = np.zeros((int(self.ysize.value), int(self.xsize.value)))
         self.func = func
 
     def add_arms(self, n=3):
@@ -104,9 +66,9 @@ class CCD(object):
             self.arm_targ = self.spec.targ_conv[self.arm_range].value
             xlength = int(slice_length/self.spat_scale/self.pix_xsize)
             self.sl_hlength = xlength // 2
-            self.psf_xlength = int(self.psf.seeing/self.spat_scale
-                                   /self.pix_xsize)
-            xspan = xlength + int(slice_gap.value)
+            self.psf_xlength = int(np.ceil(self.psf.seeing/self.spat_scale
+                                           /self.pix_xsize))
+            xspan = xlength + int(slice_gap.value/self.xbin)
             xshift = (slice_n*xspan+xlength)//2
             self.add_slices(int(x), xshift, xspan, self.psf_xlength,
                             wmin=m.value, wmax=M.value, wmin_d=m_d.value,
@@ -117,9 +79,16 @@ class CCD(object):
             if i == 0:
                 line.set_label('On detector')
 
-
         self.shot = np.sqrt(self.signal)
-        self.noise = np.sqrt(self.shot**2+(ccd_ron*ccd_gain).value**2)
+        self.dark = np.sqrt((ccd_dark*ccd_gain*self.npix*self.spec.phot.texp)\
+                            .to(au.photon).value)
+        self.ron = (ccd_ron*ccd_gain).value
+        self.noise = np.sqrt(self.shot**2 + self.dark**2 + self.ron**2)
+        print("Median shot noise: %2.3e ph/pix" % np.nanmedian(self.shot[self.shot>0]))
+        print("Dark noise: %2.3e ph/pix" % self.dark)
+        print("Readout noise: %2.3e ph/pix" % self.ron)
+        print("Median total noise: %2.3e ph/pix" % np.nanmedian(self.noise[self.shot>0]))
+
         self.noise_rand = np.random.normal(0., np.abs(self.noise), self.signal.shape)
 
         self.image = np.round(self.signal + self.noise_rand)
@@ -166,7 +135,11 @@ class CCD(object):
             self.ax = fig.axes[2]
         divider = make_axes_locatable(self.ax)
         cax = divider.append_axes('right', size='5%', pad=0.1)
-        im = self.ax.imshow(self.image, vmin=0)
+        image = np.zeros(self.image.shape)
+        thres = np.infty
+        image[self.image > thres] = thres
+        image[self.image < thres] = self.image[self.image < thres]
+        im = self.ax.imshow(image, vmin=0)
         self.ax.set_title('CCD')
         self.ax.set_xlabel('X')
         self.ax.set_ylabel('Y')
@@ -176,7 +149,6 @@ class CCD(object):
         fig.colorbar(im, cax=cax, orientation='vertical')
 
     def extr_arms(self, n=3, slice_n=slice_n):
-
 
         for a in range(n):
             wave_extr = self.wave_grid(self.wmins[a], self.wmaxs[a])
@@ -205,7 +177,6 @@ class CCD(object):
                 else:
                     flux_extr += s_extr
                     err_extr = np.sqrt(err_extr**2 + n_extr**2)
-
             dw = (wave_extr[2:]-wave_extr[:-2])*0.5
             dw = np.append(dw[:1], dw)
             dw = np.append(dw, dw[-1:])
@@ -217,8 +188,11 @@ class CCD(object):
                 axt = self.spec.ax.twinx()
                 axt.set_ylabel('SNR per pixel')
 
-            print("Median error: %2.3e" % np.median(err_extr))
-            print("RMS: %2.3e" % np.sqrt(np.mean(np.square(flux_extr[3000:3100]-np.mean(flux_extr[3000:3100])))))
+            print("Median error of extraction: %2.3e" % np.nanmedian(err_extr))
+            flux_window = flux_extr[3000//ccd_xbin:3100//ccd_ybin]
+            print("RMS of extraction: %2.3e"
+                  % np.sqrt(np.nanmean(np.square(
+                            flux_window-np.nanmean(flux_window)))))
 
             wave_snr = wave_extr[::snr_sampl]
             snr_extr = flux_extr/err_extr
@@ -239,8 +213,10 @@ class CCD(object):
     def extr_sum(self, y, dy, **kwargs):
         sel = np.s_[self.sl_hlength-self.psf_xlength
                     :self.sl_hlength+self.psf_xlength]
-        s = np.sum(y[sel])
-        n = np.sqrt(np.sum(dy[sel]**2))
+        ysel = y[sel]
+        dysel = dy[sel]
+        s = np.sum(ysel)
+        n = np.sqrt(np.sum(dysel**2))
         if np.isnan(s) or np.isnan(n) or np.isinf(s) or np.isinf(n) \
             or np.abs(s) > 1e30 or np.abs(n) > 1e30:
             s = 0
@@ -301,7 +277,6 @@ class Photons(object):
         self.bckg_mag = bckg_mag
         self.area = area #(400*au.cm)**2 * np.pi
         self.texp = texp
-
         if mag_syst == 'Vega':
             self.wave_ref = wave_U
             self.flux_ref = flux_U
@@ -316,7 +291,7 @@ class Photons(object):
         self.atmo()
 
     def atmo(self):
-        data = fits.open('atmoexan.fits')[1].data
+        data = fits.open('database/atmoexan.fits')[1].data
         self.atmo_wave = data['LAMBDA']*0.1 * au.nm
         self.atmo_ex = data['LA_SILLA']
 
@@ -403,7 +378,7 @@ class PSF(object):
             self.flux_slice += flux
             if i == 0:
                 self.fluxes = np.array([flux.value])
-                self.traces = trace
+                self.traces = [trace]
             else:
                 self.fluxes = np.append(self.fluxes, flux.value)
                 self.traces = np.vstack((self.traces, trace))
@@ -511,12 +486,13 @@ class Spec(object):
             self.ax = fig.axes[0]
         self.ax.set_title("Spectrum: texp = %2.2f %s, targ_mag = %2.2f, "
                           "bckg_mag = %2.2f, airmass=%2.2f" \
-                          % (texp.value, texp.unit, self.phot.targ_mag,
+                          % (self.phot.texp.value, self.phot.texp.unit, self.phot.targ_mag,
                              self.phot.bckg_mag, airmass))
         self.ax.plot(self.wave, self.targ/self.atmo_ex, label='Original')
         self.ax.plot(self.wave, self.targ, label='Extincted')
         self.ax.set_xlabel('Wavelength (%s)' % self.wave.unit)
         self.ax.set_ylabel('Flux density (%s)' % self.targ.unit)
+        self.ax.grid(linestyle=':')
         #self.ax.set_yscale('log')
 
     def flat(self):
@@ -529,21 +505,31 @@ class Spec(object):
                         * (self.wmax-self.wmin)
 
     def PL(self, index=-1.5):
-        return (self.wave.value/self.wave_ref)**index * self.atmo_ex
+        return (self.wave.value/self.phot.wave_ref)**index * self.atmo_ex
 
     def qso(self):#, name=qso_file):
         if self.file is None:
             name = qso_file
         else:
             name = self.file
-        data = fits.open(name)[1].data
-        data = data[np.logical_and(data['wave']*0.1 > self.wmin.value,
-                                   data['wave']*0.1 < self.wmax.value)]
-        wavef = data['wave']*0.1 * au.nm
-        fluxf = data['flux']
-        spl = cspline(wavef, fluxf)(self.wave.value)
-        sel = np.where(self.wave.value<313)
-        spl[sel] = 1.0
+        try:
+            data = fits.open(name)[1].data
+            data = data[:-1]
+            data = data[np.logical_and(data['wave']*0.1 > self.wmin.value,
+                                       data['wave']*0.1 < self.wmax.value)]
+            wavef = data['wave']*0.1 * au.nm
+            fluxf = data['flux']
+            spl = cspline(wavef, fluxf)(self.wave.value)
+            sel = np.where(self.wave.value<313)
+            spl[sel] = 1.0
+        except:
+            data = ascii.read(name)
+            wavef = data['col1']
+            fluxf = data['col2']
+            spl = cspline(wavef, fluxf)(self.wave.value)
+            sel = np.where(self.wave.value<309.3)
+            spl[sel] = 1.0
+
         flux = spl/np.mean(spl) #* au.photon/au.nm
         return flux * self.atmo_ex
 
@@ -552,7 +538,7 @@ class Spec(object):
             name = star_file
         else:
             name = self.file
-        data = ascii.read(name)#name)
+        data = ascii.read(name, data_start=2, names=['col1', 'col2'])#name)
         wavef = data['col1']*0.1 * au.nm
         fluxf = data['col2']
         spl = cspline(wavef, fluxf)(self.wave.value)
@@ -560,7 +546,6 @@ class Spec(object):
         return flux * self.atmo_ex
 
 def main():
-    #"""
     in_file = 'database/'+sys.argv[1]
     targ_mag = float(sys.argv[2])
     bckg_mag = float(sys.argv[3])
@@ -569,11 +554,16 @@ def main():
     slice_length = float(sys.argv[6])*au.arcsec
     texp = float(sys.argv[7])*au.s
     out_fig = 'database/'+sys.argv[8]
-    #"""
-    fig = plt.figure(figsize=(12,8))
-    axs = [plt.subplot(211), plt.subplot(223, aspect='equal'), plt.subplot(224)]
 
-    phot = Photons(targ_mag=targ_mag, bckg_mag=bckg_mag)
+    fig = plt.figure(figsize=(12,8))
+    axs = [plt.subplot(2,1,1), plt.subplot(2,2,3, aspect='equal'), plt.subplot(2,2,4, aspect='equal')]
+    """
+    gs = gridspec.GridSpec(2,2)
+    axs = [plt.subplot2grid((2,2), (0,0), colspan=2, rowspan=1),
+           plt.subplot2grid((2,2), (1,0), colspan=1, rowspan=1),
+           plt.subplot2grid((2,2), (1,1), colspan=1, rowspan=1)]
+    """
+    phot = Photons(targ_mag=targ_mag, bckg_mag=bckg_mag, texp=texp)
 
     spec = Spec(phot, file=in_file)
     spec.draw(fig)
@@ -589,9 +579,11 @@ def main():
     ccd.draw(fig)
 
     spec.ax.legend(loc=2)
-    plt.tight_layout()
+    # Tight layout shrinks images when binning higher than 1x1 is used
+    if ccd_xbin==1 and ccd_ybin==1:
+        plt.tight_layout()
     plt.savefig(out_fig, format='png')
-#    plt.show()
+    plt.show()
 
 if __name__ == '__main__':
     main()
