@@ -141,7 +141,13 @@ class Format():
         self.wave = self.create_wave(hdul)
         self.flux = hdul[0].data
         self.err = hdul[1].data
-        self.arm = self.path_i[-9:-5]  # UVB, VIS or NIR
+
+        # 'find' gives -1 for all but one arm tags; the sum of the three calls
+        # is always 2 positions left from the position where the arm tag
+        # appears; +1 is meant to take also the underscore before the arm tag
+        arm_start = self.path_i.find('UVB')+self.path_i.find('VIS')\
+                    +self.path_i.find('NIR')+1
+        self.arm = self.path_i[arm_start:arm_start+4]  # UVB, VIS or NIR
 
         # Define ESPRESSO-like BINX and BINY
         try:  # UVB/VIS
@@ -151,6 +157,17 @@ class Format():
             hdr['HIERARCH ESO DET BINX'] = 1
             hdr['HIERARCH ESO DET BINX'] = 2
 
+        if self.baryvac_f:
+            air_to_vacuum(self)
+            self.hdr = hdr
+            self.expt = self.hdr['EXPTIME'] * u.s
+            self.date = self.hdr['DATE-OBS']
+            start = Time(self.date, format='isot', scale='utc')
+            mid = TimeDelta(self.expt / 2.0, format='sec')
+            self.midtime = start + mid
+            #earth_to_bary(self)
+            barycor_vel = self.hdr['ESO QC VRAD BARYCOR']*u.km/u.s
+            self.wave = self.wave * (1 + barycor_vel/c).value
         self.convert(hdr)
 
     def xsh_reduce(self):
@@ -162,7 +179,11 @@ class Format():
         self.wave = self.create_wave(hdul, log=True)
         self.flux = hdul[0].data
         self.err = hdul_e[0].data
-        self.arm = self.path_i[-9:-5]  # UVB, VIS or NIR
+
+        # See 'xsh' above for explanation
+        arm_start = self.path_i.find('UVB')+self.path_i.find('VIS')\
+                    +self.path_i.find('NIR')+1
+        self.arm = self.path_i[arm_start:arm_start+4]  # UVB, VIS or NIR
 
         self.convert(hdr)
 
