@@ -20,11 +20,11 @@ from matplotlib import pyplot as plt
 from matplotlib import patches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
-from scipy.interpolate import  CubicSpline as cspline #interp1d
+from scipy.interpolate import CubicSpline as cspline #interp1d
+from scipy.interpolate import UnivariateSpline as uspline
 from scipy.ndimage import gaussian_filter, interpolation
 from scipy.special import expit
 import sys
-
 
 class CCD(object):
 
@@ -132,7 +132,7 @@ class CCD(object):
         if fig is None:
             fig, self.ax = plt.subplots()
         else:
-            self.ax = fig.axes[2]
+            self.ax = fig.axes[3]
         divider = make_axes_locatable(self.ax)
         cax = divider.append_axes('right', size='5%', pad=0.1)
         image = np.zeros(self.image.shape)
@@ -143,13 +143,17 @@ class CCD(object):
         self.ax.set_title('CCD')
         self.ax.set_xlabel('X')
         self.ax.set_ylabel('Y')
-        self.ax.text(100, 4000, "Total: %1.3e %s"
+        self.ax.text(0.025, 0.025, "Total: %1.3e %s"
                      % (np.sum(self.signal), au.photon),
-                     ha='left', va='bottom', color='white')
+                     ha='left', va='bottom', color='white',
+                     transform=self.ax.transAxes)
+        cax.xaxis.set_label_position('top')
+        cax.set_xlabel('Photon')
         fig.colorbar(im, cax=cax, orientation='vertical')
 
     def extr_arms(self, n=3, slice_n=slice_n):
 
+        wave_snr = np.arange(self.wmins[0].value, self.wmaxs[2].value, snr_sampl.value)
         for a in range(n):
             wave_extr = self.wave_grid(self.wmins[a], self.wmaxs[a])
             for s in range(slice_n):
@@ -183,10 +187,7 @@ class CCD(object):
             flux_extr = flux_extr / dw
             err_extr = err_extr / dw
             line = self.spec.ax.scatter(wave_extr, flux_extr, s=2, c='C0')
-
-            if a == 0:
-                axt = self.spec.ax.twinx()
-                axt.set_ylabel('SNR per pixel')
+            #line, = self.spec.ax.step(wave_extr, flux_extr, linewidth=3, c='C0')
 
             print("Median error of extraction: %2.3e" % np.nanmedian(err_extr))
             flux_window = flux_extr[3000//ccd_xbin:3100//ccd_ybin]
@@ -194,21 +195,38 @@ class CCD(object):
                   % np.sqrt(np.nanmean(np.square(
                             flux_window-np.nanmean(flux_window)))))
 
-            wave_snr = wave_extr[::snr_sampl]
+            #wave_snr = wave_extr[::snr_sampl]
             snr_extr = flux_extr/err_extr
             snr_extr[np.where(np.isnan(snr_extr))] = 0
             snr_extr[np.where(np.isinf(snr_extr))] = 0
-            snr = cspline(wave_extr, snr_extr)(wave_snr)
-            linet = axt.scatter(wave_snr, snr, s=4, c='black')
+            snr_spl = cspline(wave_extr, snr_extr)(wave_snr)
+            snr_spl[wave_snr<self.wmins[a].value] = 0.0
+            snr_spl[wave_snr>self.wmaxs[a].value] = 0.0
+            if a == 0:
+                snr = snr_spl
+                line.set_label('Extracted')
+            else:
+                snr = np.sqrt(snr**2+snr_spl**2)
+            #snr = uspline(wave_extr, snr_extr)(wave_snr)
+
+            """
+            linet, = self.spec.ax_snr.plot(wave_snr, snr, c='black')
 
             if a == 0:
                 line.set_label('Extracted')
                 linet.set_label('SNR')
-                axt.text(self.wmaxs[2].value, 0,
-                         "Median SNR: %2.1f" % np.median(snr),
-                         ha='right', va='bottom')
-            axt.legend(loc=1)
-
+                self.spec.ax_snr.text(self.wmaxs[2].value, 0,
+                                      "Median SNR: %2.1f" % np.median(snr),
+                                      ha='right', va='bottom')
+            self.spec.ax_snr.legend(loc=2)
+            """
+        linet, = self.spec.ax_snr.plot(wave_snr, snr, linestyle='--', c='black')
+        linet.set_label('SNR')
+        self.spec.ax_snr.text(0.99, 0.92,
+                              "Median SNR: %2.1f" % np.median(snr),
+                              ha='right', va='top',
+                              transform=self.spec.ax_snr.transAxes)
+        self.spec.ax_snr.legend(loc=2, fontsize=8)
 
     def extr_sum(self, y, dy, **kwargs):
         sel = np.s_[self.sl_hlength-self.psf_xlength
@@ -421,7 +439,7 @@ class PSF(object):
         if fig is None:
             fig, self.ax = plt.subplots()
         else:
-            self.ax = fig.axes[1]
+            self.ax = fig.axes[2]
         divider = make_axes_locatable(self.ax)
         cax = divider.append_axes('right', size='5%', pad=0.1)
         im = self.ax.contourf(self.x, self.y, self.z, 100, vmin=0)
@@ -431,6 +449,8 @@ class PSF(object):
         self.ax.text(-self.xsize.value/2*0.95, -self.ysize.value/2*0.63,
                      "FWHM: %3.2f arcsec" % self.fwhm, ha='left', va='bottom',
                      color='white')
+        cax.xaxis.set_label_position('top')
+        cax.set_xlabel('Photon')
         fig.colorbar(im, cax=cax, orientation='vertical')
 
 
@@ -484,6 +504,7 @@ class Spec(object):
             fig, self.ax = plt.subplots()
         else:
             self.ax = fig.axes[0]
+            self.ax_snr = fig.axes[1]
         self.ax.set_title("Spectrum: texp = %2.2f %s, targ_mag = %2.2f, "
                           "bckg_mag = %2.2f, airmass=%2.2f" \
                           % (self.phot.texp.value, self.phot.texp.unit, self.phot.targ_mag,
@@ -491,9 +512,11 @@ class Spec(object):
         self.ax.plot(self.wave, self.targ/self.atmo_ex, label='Original')
         self.ax.plot(self.wave, self.targ, label='Extincted')
         self.ax.set_xlabel('Wavelength (%s)' % self.wave.unit)
-        self.ax.set_ylabel('Flux density (%s)' % self.targ.unit)
+        self.ax.set_ylabel('Flux density\n(%s)' % self.targ.unit)
         self.ax.grid(linestyle=':')
-        #self.ax.set_yscale('log')
+        self.ax_snr.set_xlabel('Wavelength')
+        self.ax_snr.set_ylabel('SNR per pixel')
+        self.ax_snr.grid(linestyle=':')
 
     def flat(self):
         return np.ones(self.wave.shape) * self.atmo_ex
@@ -505,7 +528,7 @@ class Spec(object):
                         * (self.wmax-self.wmin)
 
     def PL(self, index=-1.5):
-        return (self.wave.value/self.phot.wave_ref)**index * self.atmo_ex
+        return (self.wave.value/self.phot.wave_ref.value)**index * self.atmo_ex
 
     def qso(self):#, name=qso_file):
         if self.file is None:
@@ -523,15 +546,44 @@ class Spec(object):
             sel = np.where(self.wave.value<313)
             spl[sel] = 1.0
         except:
-            data = ascii.read(name)
-            wavef = data['col1']
+            data = ascii.read(name, data_start=1, names=['col1', 'col2', 'col3', 'col4'])
+            wavef = data['col1']*0.1 * au.nm * (1+qso_zem)
             fluxf = data['col2']
             spl = cspline(wavef, fluxf)(self.wave.value)
-            sel = np.where(self.wave.value<309.3)
-            spl[sel] = 1.0
 
         flux = spl/np.mean(spl) #* au.photon/au.nm
+        #if qso_lya_abs:
+        #    flux = self.lya_abs(flux)
         return flux * self.atmo_ex
+
+    def lya_abs(self, flux):
+        logN_0 = 12
+        logN_1 = 14
+        logN_2 = 18
+        logN_3 = 19
+        index = -1.65
+
+        f_0 = 1.0
+        f_1 = 1e14/np.log(1e14)
+        f_2 = np.log(1e18)/np.log(1e14)*1e5
+
+        tau_norm = 0.0028
+        tau_index = 3.45
+
+
+
+        den = (10**(logN_1*(2+index))-10**(logN_0*(2+index))) / (2+index)
+        den = den + f_1 * (10**(logN_2*(1+index)))/(1+index) * np.log(10**(logN_2)) \
+              - 1/(1+index)
+        den = den - f_1 * (10**(logN_1*(1+index)))/(1+index) * np.log(10**(logN_1)) \
+              - 1/(1+index)
+        #print(den)
+
+        corr = np.ones(len(flux))
+        z = self.wave.value/121.567 - 1
+        corr[z<qso_zem] = np.exp(-1e6*tau_norm*(1+z[z<qso_zem])**tau_index*1/den)*f_0
+        #print(np.exp(tau_norm*(1+z[z<qso_zem])**tau_index*1/den), corr)
+        return flux * corr
 
     def star(self):#, name=star_file):
         if self.file is None:
@@ -546,26 +598,17 @@ class Spec(object):
         return flux * self.atmo_ex
 
 def main():
-    in_file = 'database/'+sys.argv[1]
-    targ_mag = float(sys.argv[2])
-    bckg_mag = float(sys.argv[3])
-    seeing = float(sys.argv[4])*au.arcsec
-    slice_width = float(sys.argv[5])*au.arcsec
-    slice_length = float(sys.argv[6])*au.arcsec
-    texp = float(sys.argv[7])*au.s
-    out_fig = 'database/'+sys.argv[8]
 
+    # Set up window
     fig = plt.figure(figsize=(12,8))
-    axs = [plt.subplot(2,1,1), plt.subplot(2,2,3, aspect='equal'), plt.subplot(2,2,4, aspect='equal')]
-    """
-    gs = gridspec.GridSpec(2,2)
-    axs = [plt.subplot2grid((2,2), (0,0), colspan=2, rowspan=1),
-           plt.subplot2grid((2,2), (1,0), colspan=1, rowspan=1),
-           plt.subplot2grid((2,2), (1,1), colspan=1, rowspan=1)]
-    """
+    axs = [plt.subplot(5,1,1), plt.subplot(5,1,2),
+           plt.subplot(2,2,3, aspect='equal'),
+           plt.subplot(2,2,4, aspect='equal')]
+    axs[0].get_shared_x_axes().join(axs[0], axs[1])
+
     phot = Photons(targ_mag=targ_mag, bckg_mag=bckg_mag, texp=texp)
 
-    spec = Spec(phot, file=in_file)
+    spec = Spec(phot, file=in_file, func=spec_func)
     spec.draw(fig)
 
     psf = PSF(spec, seeing=seeing, slice_width=slice_width, xsize=slice_length,
@@ -573,17 +616,42 @@ def main():
     psf.draw(fig)
     psf.add_slices()
 
-    ccd = CCD(psf, spec)
+    ccd = CCD(psf, spec, xbin=ccd_xbin, ybin=ccd_ybin)
     ccd.add_arms()
     ccd.extr_arms()
     ccd.draw(fig)
 
-    spec.ax.legend(loc=2)
+    spec.ax.legend(loc=2, fontsize=8)
     # Tight layout shrinks images when binning higher than 1x1 is used
-    if ccd_xbin==1 and ccd_ybin==1:
-        plt.tight_layout()
-    plt.savefig(out_fig, format='png')
+    #if ccd_xbin==1 and ccd_ybin==1:
+    #    plt.tight_layout()
+    plt.subplots_adjust(wspace=0, hspace=0)
+    if out_fig != None:
+        plt.savefig(out_fig, format='png')
     plt.show()
 
 if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        in_file = 'database/'+sys.argv[1]
+        targ_mag = float(sys.argv[2])
+        bckg_mag = float(sys.argv[3])
+        seeing = float(sys.argv[4])*au.arcsec
+        airmass = float(sys.argv[5])
+        slice_width = float(sys.argv[6])*au.arcsec
+        slice_length = float(sys.argv[7])*au.arcsec
+        ccd_xbin = int(sys.argv[8])
+        ccd_ybin = int(sys.argv[9])
+        texp = float(sys.argv[10])*au.s
+        out_fig = 'database/'+sys.argv[11]
+        if sys.argv[1] == 'Zheng+97.txt':
+            spec_func = 'qso'
+        else:
+            spec_func = 'star'
+    else:
+        print('Loading command line parameters from cubes_sim_config.py...')
+        if spec_func == 'qso':
+            in_file = 'database/'+qso_file
+        if spec_func == 'star':
+            in_file = 'database/'+star_file
+        out_fig = None
     main()

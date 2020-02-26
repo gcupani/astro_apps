@@ -63,7 +63,7 @@ targ_mag = 11.15  # Magnitude of the target @ 350 nm
 bckg_mag = 22.5  # Magnitude of the background @ 350 nm
 airmass = 1.0  # Airmass
 
-spec_func = 'star'  # Function for the template spectrum ('flat', 'PL', 'qso', 'star')
+spec_func = 'qso'  # Function for the template spectrum ('flat', 'PL', 'qso', 'star')
 qso_file = 'J1124-1705.fits'
 star_file = 'Castelliap000T5250g45.dat'
 extr_func = 'sum'  # Function for extracting the spectrum ('sum', 'opt')
@@ -168,7 +168,11 @@ class CCD(object):
             self.ax = fig.axes[2]
         divider = make_axes_locatable(self.ax)
         cax = divider.append_axes('right', size='5%', pad=0.1)
-        im = self.ax.imshow(self.image, vmin=0)
+        image = np.zeros(self.image.shape)
+        thres = 30
+        image[self.image > thres] = thres
+        image[self.image < thres] = self.image[self.image < thres]
+        im = self.ax.imshow(image, vmin=0)
         self.ax.set_title('CCD')
         self.ax.set_xlabel('X')
         self.ax.set_ylabel('Y')
@@ -303,7 +307,6 @@ class Photons(object):
         self.bckg_mag = bckg_mag
         self.area = area #(400*au.cm)**2 * np.pi
         self.texp = texp
-
         if mag_syst == 'Vega':
             self.wave_ref = wave_U
             self.flux_ref = flux_U
@@ -513,12 +516,13 @@ class Spec(object):
             self.ax = fig.axes[0]
         self.ax.set_title("Spectrum: texp = %2.2f %s, targ_mag = %2.2f, "
                           "bckg_mag = %2.2f, airmass=%2.2f" \
-                          % (texp.value, texp.unit, self.phot.targ_mag,
+                          % (self.phot.texp.value, self.phot.texp.unit, self.phot.targ_mag,
                              self.phot.bckg_mag, airmass))
         self.ax.plot(self.wave, self.targ/self.atmo_ex, label='Original')
         self.ax.plot(self.wave, self.targ, label='Extincted')
         self.ax.set_xlabel('Wavelength (%s)' % self.wave.unit)
         self.ax.set_ylabel('Flux density (%s)' % self.targ.unit)
+        self.ax.grid(linestyle=':')
         #self.ax.set_yscale('log')
 
     def flat(self):
@@ -531,7 +535,7 @@ class Spec(object):
                         * (self.wmax-self.wmin)
 
     def PL(self, index=-1.5):
-        return (self.wave.value/self.wave_ref)**index * self.atmo_ex
+        return (self.wave.value/self.phot.wave_ref)**index * self.atmo_ex
 
     def qso(self):#, name=qso_file):
         if self.file is None:
@@ -575,7 +579,7 @@ def main():
     fig = plt.figure(figsize=(12,8))
     axs = [plt.subplot(211), plt.subplot(223, aspect='equal'), plt.subplot(224)]
 
-    phot = Photons(targ_mag=targ_mag, bckg_mag=bckg_mag)
+    phot = Photons(targ_mag=targ_mag, bckg_mag=bckg_mag, texp=texp)
 
     spec = Spec(phot, file=in_file)
     spec.draw(fig)
@@ -593,7 +597,7 @@ def main():
     spec.ax.legend(loc=2)
     plt.tight_layout()
     plt.savefig(out_fig, format='png')
-#    plt.show()
+    #plt.show()
 
 if __name__ == '__main__':
     main()

@@ -18,8 +18,8 @@ resol = [2.0e4, 2.1e4, 2.2e4]  # Instrument resolution
 
 ccd_xsize = 4096*au.pixel  # X size of the CCD
 ccd_ysize = 4096*au.pixel  # Y size of the CCD
-ccd_xbin = 8  # X binning of the CCD
-ccd_ybin = 16  # Y binning of the CCD
+ccd_xbin = 1  # X binning of the CCD
+ccd_ybin = 1  # Y binning of the CCD
 pix_xsize = 15*au.micron  # X size of the pixels
 pix_ysize = 15*au.micron  # Y size of the pixels
 spat_scale = 0.25*au.arcsec/(30*au.micron)  # Spatial scale
@@ -32,19 +32,21 @@ ccd_ron = 2*au.adu
 ccd_gain = 1.1*au.photon/au.adu
 ccd_dark = 0.5*au.adu/au.h
 
-seeing = 1.0*au.arcsec  # Seeing
+seeing = 0.7*au.arcsec  # Seeing
 psf_func = 'gaussian'  # Function to represent the PSF ('tophat', 'gaussian', 'moffat')
 psf_sampl = 1000*au.pixel  # Size of the PSF image
 psf_cen = (0,0)  # Center of the PSF
 area = (400*au.cm)**2 * np.pi  # Telescope area
-texp = 600*au.s  # Exposure time
+texp = 3600*au.s  # Exposure time
 mag_syst = 'AB'  # Magnitude system
-targ_mag = 11.15  # Magnitude of the target @ 350 nm
+targ_mag = 17  # Magnitude of the target @ 350 nm
 bckg_mag = 22.5  # Magnitude of the background @ 350 nm
 airmass = 1.0  # Airmass
 
 spec_func = 'qso'  # Function for the template spectrum ('flat', 'PL', 'qso', 'star')
-qso_file = 'J1124-1705.fits'
+qso_file = 'Zheng+97.txt'
+qso_zem = 1.8
+qso_lya_abs = True
 star_file = 'Castelliap000T5250g45.dat'
 extr_func = 'sum'  # Function for extracting the spectrum ('sum', 'opt' [very slow])
-snr_sampl = 50  # Data points per SNR point
+snr_sampl = 1*au.nm  # Data points per SNR point
