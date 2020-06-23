@@ -489,9 +489,9 @@ class CCD(object):
                 self.spec.err_extr = np.array(err_extr)
 
             else:
-                self.spec.wave_extr = np.vstack((self.spec.wave_extr, wave_extr))
-                self.spec.flux_extr = np.vstack((self.spec.flux_extr, flux_extr))
-                self.spec.err_extr = np.vstack((self.spec.err_extr, err_extr))
+                self.spec.wave_extr = np.vstack((self.spec.wave_extr, wave_extr.value))
+                self.spec.flux_extr = np.vstack((self.spec.flux_extr, flux_extr.value))
+                self.spec.err_extr = np.vstack((self.spec.err_extr, err_extr.value))
 
 
             
@@ -754,8 +754,8 @@ class PSF(object):
                 self.fluxes_targ = np.append(self.fluxes_targ, flux_targ.value)
                 self.fluxes_bckg = np.append(self.fluxes_bckg, flux_bckg.value)
                 self.traces = np.vstack((self.traces, trace.value))
-                self.traces_targ = np.vstack((self.traces_targ, trace_targ))
-                self.traces_bckg = np.vstack((self.traces_bckg, trace_bckg))
+                self.traces_targ = np.vstack((self.traces_targ, trace_targ.value))
+                self.traces_bckg = np.vstack((self.traces_bckg, trace_bckg.value))
         print("Slices designed on field.     ")
 
 
