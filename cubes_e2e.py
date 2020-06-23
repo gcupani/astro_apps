@@ -1,0 +1,1347 @@
+# ------------------------------------------------------------------------------
+# CUBES_E2E
+# Simulate the spectral format of CUBES and estimate the SNR for an input spectrum
+# Guido Cupani - INAF-OATs
+# ------------------------------------------------------------------------------
+
+from cubes_e2e_config import *
+from astropy import units as au
+from astropy.io import ascii, fits
+from astropy.modeling.fitting import LevMarLSQFitter as lm
+from astropy.modeling.functional_models import Gaussian1D, Gaussian2D, Moffat2D
+from astropy.table import Table
+import matplotlib
+from matplotlib import gridspec
+from matplotlib import pyplot as plt
+plt.rcParams.update({'font.size': 14})
+from matplotlib import patches
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import numpy as np
+from scipy.interpolate import CubicSpline as cspline #interp1d
+from scipy.interpolate import UnivariateSpline as uspline
+from scipy.ndimage import gaussian_filter, interpolation
+from scipy.special import expit
+import sys
+import warnings
+warnings.filterwarnings('ignore', '.*output shape of zoom.*')
+
+class CCD(object):
+
+    def __init__(self, psf, spec, xsize=ccd_xsize, ysize=ccd_ysize,
+                 xbin=ccd_xbin, ybin=ccd_ybin,
+                 pix_xsize=pix_xsize, pix_ysize=pix_ysize,
+                 spat_scale=spat_scale, slice_n=slice_n, func=extr_func):
+        self.psf = psf
+        self.spec = spec
+        self.xsize = xsize/xbin
+        self.ysize = ysize/ybin
+        self.xbin = xbin
+        self.ybin = ybin
+        self.npix = xbin*ybin
+        self.pix_xsize = pix_xsize*xbin
+        self.pix_ysize = pix_ysize*ybin
+        self.spat_scale = spat_scale
+
+        self.func = func
+        #self.signal = np.zeros((int(self.ysize.value), int(self.xsize.value)))
+
+
+    def add_arms(self, n, wave_sampl, wave_d, wave_d_shift):
+        #self.arm_n = n
+        #s = int(self.xsize.value/(n*3-1))
+        #self.xcens = np.arange(s, self.xsize.value, 3*s)
+        self.xcens = [self.xsize.value//2]*n
+        
+        self.signal = np.zeros((int(self.ysize.value), int(self.xsize.value), n))
+        self.dsignal = np.zeros((int(self.ysize.value), int(self.xsize.value), n))
+        self.noise = np.zeros((int(self.ysize.value), int(self.xsize.value), n))
+
+
+        self.dark = np.sqrt((ccd_dark*ccd_gain*self.npix*self.spec.phot.texp)\
+                            .to(au.photon).value)
+        self.ron = (ccd_ron*ccd_gain).value
+
+       
+        """
+        if n == 3:
+            self.wmins = [305, 328, 355] * au.nm
+            self.wmaxs = [335, 361, 390] * au.nm
+            self.wmins_d = [300, 331.5, 358] * au.nm  # Dichroich transition wavelengths
+            self.wmaxs_d = [331.5, 358, 400] * au.nm
+        elif n == 2:
+            self.wmins = [305, 343] * au.nm
+            self.wmaxs = [350, 390] * au.nm
+            self.wmins_d = [300, 347.5] * au.nm  # Dichroich transition wavelengths
+            self.wmaxs_d = [347.5, 400] * au.nm
+        """
+        
+        #print(self.wmins)
+        #print(self.wmaxs)
+        #print(self.wmins_d)
+        #print(self.wmaxs_d)
+
+        wmax = wave_d[0]+wave_d_shift
+        wmin = wmax-self.ysize*wave_sampl[0]
+        self.wmins = np.array([wmin.to(au.nm).value])
+        self.wmaxs = np.array([wmax.to(au.nm).value])
+        self.wmins_d = np.array([wmin.to(au.nm).value])
+        self.wmaxs_d = np.array([wave_d[0].to(au.nm).value])
+        for i in range(len(wave_d)): 
+            wmin = wave_d[i]-wave_d_shift
+            wmax = wmin+self.ysize*wave_sampl[i+1]
+            self.wmins = np.append(self.wmins, wmin.to(au.nm).value)
+            self.wmaxs = np.append(self.wmaxs, wmax.to(au.nm).value)
+            self.wmins_d = np.append(self.wmins_d, wave_d[i].to(au.nm).value)
+            try:
+                self.wmaxs_d = np.append(self.wmaxs_d, wave_d[i+1].to(au.nm).value)
+            except:
+                self.wmaxs_d = np.append(self.wmaxs_d, wmax.to(au.nm).value)
+        self.wmins_d[0] = 200
+        self.wmaxs_d[-1] = 500
+        self.wmins = self.wmins * au.nm
+        self.wmaxs = self.wmaxs * au.nm
+        self.wmins_d = self.wmins_d * au.nm
+        self.wmaxs_d = self.wmaxs_d * au.nm
+
+        #"""
+        self.mod_init = []
+        self.sl_cen = []
+        self.spec.m_d = []
+        self.spec.M_d = []
+        self.spec.arm_wave = []
+        self.spec.arm_targ = []
+        self.spec.tot_eff = self.tot_eff
+        self.targ_sum = 0
+        self.bckg_sum = 0
+        self.targ_prof = []
+        self.bckg_prof = []
+        
+        self.targ_noise_max = []
+        self.bckg_noise_med = []
+        self.spec.fwhm = []
+
+        for i, (x, m, M, m_d, M_d) in enumerate(zip(
+            self.xcens, self.wmins, self.wmaxs, self.wmins_d, self.wmaxs_d)):
+            self.sl_targ_prof = []
+            self.sl_bckg_prof = []
+
+            self.arm_counter = i
+            self.arm_range = np.logical_and(self.spec.wave.value>m.value,
+                                            self.spec.wave.value<M.value)
+            self.arm_wave = self.spec.wave[self.arm_range].value
+            self.arm_targ = self.spec.targ_conv[self.arm_range].value
+            xlength = int(slice_length/self.spat_scale/self.pix_xsize)
+            self.sl_hlength = xlength // 2
+            self.psf_xlength = int(np.ceil(self.psf.seeing/self.spat_scale
+                                           /self.pix_xsize))
+            xspan = xlength + int(slice_gap.value/self.xbin)
+            xshift = (slice_n*xspan+xlength)//2
+            self.add_slices(int(x), xshift, xspan, self.psf_xlength,
+                            wmin=m.value, wmax=M.value, wmin_d=m_d.value,
+                            wmax_d=M_d.value, arm=i)
+            self.spec.m_d.append(m_d.value)
+            self.spec.M_d.append(M_d.value)
+            self.spec.arm_wave.append(self.arm_wave)
+            self.spec.arm_targ.append(self.arm_targ)
+            #sampl = (M-m)/self.ysize 
+            fwhm = [w/resol[i]/wave_sampl[i] for w in [m, M]]
+            #self.spec.fwhm = np.vstack((self.fwhm, self.arm_wave/resol[i]/wave_sampl[i]))
+            self.spec.fwhm.append(self.arm_wave/resol[i]/wave_sampl[i])
+
+            self.targ_prof = np.append(self.targ_prof, self.sl_targ_prof)
+            self.bckg_prof = np.append(self.bckg_prof, self.sl_bckg_prof)
+            self.sl_targ_peak = self.sl_targ_prof[self.sl_targ_prof>99e-2*np.max(self.sl_targ_prof)]
+            self.sl_targ_prof = self.sl_targ_prof * au.ph
+            self.sl_bckg_prof = self.sl_bckg_prof * au.ph
+            
+            #targ_noise = np.median(np.sqrt(self.sl_targ_peak))*self.sl_targ_prof.unit/au.pixel
+            #bckg_noise = np.median(np.sqrt(self.sl_bckg_prof))*self.sl_bckg_prof.unit/au.pixel
+
+            self.targ_noise_max = np.append(self.targ_noise_max, np.sqrt(np.max(self.sl_targ_prof)))
+            self.bckg_noise_med = np.append(self.bckg_noise_med, np.sqrt(np.median(self.sl_bckg_prof)))
+
+            """
+
+            
+            print("Arm %i:" % i)
+            print(" range: [%3.3f-%3.3f] %s" % (m.value, M.value, m.unit))    
+            print(" FWHM (resolution %3.2e): [%3.3f-%3.3f] %s" % (resol[i], fwhm[0].value, fwhm[1].value, fwhm[0].unit))
+            print(" median flux:")
+            print("  from target: %2.3e %s" % (np.median(self.sl_targ_peak), self.sl_targ_prof.unit/au.pixel))
+            print("  from background: %2.3e %s" % (np.median(self.sl_bckg_prof.value), self.sl_bckg_prof.unit/au.pixel))
+            print(" median noise:")
+            print("  from target: %2.3e %s" % (np.median(np.sqrt(self.sl_targ_peak)), self.sl_targ_prof.unit/au.pixel))
+            print("  from background: %2.3e %s" % (np.median(np.sqrt(self.sl_bckg_prof.value)), self.sl_bckg_prof.unit/au.pixel))
+            """
+            
+            #noise = np.sqrt(targ_noise.value**2 + bckg_noise.value**2 + self.dark**2 + self.ron**2)
+
+            
+            #targ_noise_rand = np.random.normal(0., 1., self.signal[:,:,i].shape)*self.targ_prof
+            #bckg_noise_rand = np.random.normal(0., 1., self.signal[:,:,i].shape)*self.bckg_prof
+            #dark_rand = np.random.normal(0., np.abs(self.dark), self.signal[:,:,i].shape)
+            #ron_rand = np.random.normal(0., np.abs(self.ron), self.signal[:,:,i].shape)
+            #noise_rand = np.sqrt(targ_noise_rand.value**2 + bckg_noise_rand.value**2 + self.dark**2 + self.ron**2)
+            #self.noise[:,:,i] = noise_rand
+    
+
+
+
+
+
+
+            """
+            line, = self.spec.ax.plot(
+                self.arm_wave, self.arm_targ \
+                * self.tot_eff(self.arm_wave, m_d.value, M_d.value), c='C3')
+            if i == 0:
+                line.set_label('On detector')
+            """
+        print("Slices projected onto arms.       ")
+
+        self.targ_peak = self.targ_prof[self.targ_prof>99e-2*np.max(self.targ_prof)]
+
+        self.targ_prof = self.targ_prof * au.ph
+        self.bckg_prof = self.bckg_prof * au.ph
+
+        self.targ_sum = self.targ_sum * au.ph
+        self.bckg_sum = self.bckg_sum * au.ph
+
+        self.spec.targ_sum = self.targ_sum
+        
+        self.targ_noise_max = self.targ_noise_max.value * au.ph/au.pixel
+        self.bckg_noise_med = self.bckg_noise_med.value * au.ph/au.pixel
+
+
+
+        """
+        print("Flux on the CCD:")
+        print(" from target: %2.3e %s" % (self.targ_sum.value, self.targ_sum.unit))
+        print(" from background: %2.3e %s" % (self.bckg_sum.value, self.bckg_sum.unit))
+        print("Median noise on the CCD:")
+        print(" from target: %2.3e %s" % (np.median(np.sqrt(self.targ_peak)), self.targ_prof.unit/au.pixel))
+        print(" from background: %2.3e %s" % (np.median(np.sqrt(self.bckg_prof.value)), self.bckg_prof.unit/au.pixel))
+        print(" from dark current: %2.3e %s" % (self.dark, au.ph/au.pixel))
+        print(" from readout: %2.3e %s" % (self.ron, au.ph/au.pixel))
+        """
+
+
+        #print(self.sl_targ_sum, self.sl_bckg_sum, self.sl_targ_sum+self.sl_bckg_sum)
+        #print(np.sum(self.signal))
+            
+        #self.shot = np.sqrt(self.signal)
+        #self.noise = np.sqrt(self.shot**2 + self.dark**2 + self.ron**2)
+        #print("Median shot noise: %2.3e ph/pix" % np.nanmedian(self.shot[self.shot>0]))
+        #print("Dark noise: %2.3e ph/pix" % self.dark)
+        #print("Readout noise: %2.3e ph/pix" % self.ron)
+        #print("Median total noise: %2.3e ph/pix" % np.nanmedian(self.noise[self.shot>0]))
+
+        #self.noise_rand = np.random.normal(0., np.abs(self.noise), self.signal.shape)
+
+        self.image = np.round(self.signal + self.dsignal)
+
+
+    def add_slice(self, trace, trace_targ, trace_bckg, xcen, wmin, wmax, wmin_d, wmax_d):
+
+        wave_in = self.spec.wave.value
+
+        # Normalization 
+        targ_sum = np.sum(self.spec.targ_conv)
+        bckg_sum = np.sum(self.spec.bckg_conv)
+        targ = self.spec.targ_conv[np.logical_and(wave_in>self.wmins[0].value, wave_in<self.wmaxs[-1].value)]
+        bckg = self.spec.bckg_conv[np.logical_and(wave_in>self.wmins[0].value, wave_in<self.wmaxs[-1].value)]
+        wave_red = wave_in[np.logical_and(wave_in>self.wmins[0].value, wave_in<self.wmaxs[-1].value)]
+        self.spec.targ_norm = targ/targ_sum #np.sum(targ)
+        self.spec.bckg_norm = bckg/bckg_sum #np.sum(bckg)
+
+        
+        if wmin is not None and wmax is not None or 1==1:
+            #norm = self.spec.norm_conv[np.logical_and(
+            #    self.spec.wave.value>wmin, self.spec.wave.value<wmax)]
+            """
+            targ = self.spec.targ_conv[np.logical_and(
+                self.spec.wave.value>wmin, self.spec.wave.value<wmax)]
+            bckg = self.spec.bckg_conv[np.logical_and(
+                self.spec.wave.value>wmin, self.spec.wave.value<wmax)]
+            """
+            targ = self.spec.targ_norm[np.logical_and(wave_red>wmin, wave_red<wmax)]
+            bckg = self.spec.bckg_norm[np.logical_and(wave_red>wmin, wave_red<wmax)]
+            wave = self.wave_grid(wmin, wmax)
+            
+    
+        else:
+            #norm = self.spec.norm_conv
+            targ = self.spec.targ_norm
+            bckg = self.spec.bckg_norm
+
+            
+        sl_trace = self.rebin(trace.value, self.sl_hlength*2)
+        sl_trace_targ = self.rebin(trace_targ.value, self.sl_hlength*2)
+        sl_trace_bckg = self.rebin(trace_bckg.value, self.sl_hlength*2)
+        """
+        sl_norm = self.rebin(norm.value, self.ysize.value)
+        sl_norm_bckg = np.ones(sl_norm.shape)
+        sl_norm_bckg = sl_norm_bckg/np.sum(sl_norm_bckg)
+        """
+        sl_targ = self.rebin(targ.value, self.ysize.value)
+        sl_bckg = self.rebin(bckg.value, self.ysize.value)
+
+        #sl_targ = self.rebin(targ.value/np.sum(targ.value), self.ysize.value)
+        #sl_bckg = self.rebin(bckg.value/np.sum(bckg.value), self.ysize.value)
+        #"""
+            
+
+        #print(targ.value/np.sum(targ.value))
+        #print(self.spec.targ_norm)
+        
+        # Efficiency
+        if wmin_d is not None and wmax_d is not None:
+            #sl_norm = sl_norm * self.tot_eff(wave, wmin_d, wmax_d)
+            sl_targ = sl_targ * self.tot_eff(wave, wmin_d, wmax_d)
+            sl_bckg = sl_bckg * self.tot_eff(wave, wmin_d, wmax_d)
+
+
+
+        #signal = np.round(np.multiply.outer(sl_norm, sl_trace))
+        #signal = np.round(np.multiply.outer(sl_norm, sl_trace_targ)+np.multiply.outer(sl_norm_bckg, sl_trace_bckg))
+        sl_targ_prof = np.multiply.outer(sl_targ, sl_trace_targ)
+        sl_bckg_prof = np.multiply.outer(sl_bckg, sl_trace_bckg)
+        self.targ_sum += np.sum(sl_targ_prof)
+        self.bckg_sum += np.sum(sl_bckg_prof)
+        self.sl_targ_prof = np.append(self.sl_targ_prof, sl_targ_prof)
+        self.sl_bckg_prof = np.append(self.sl_bckg_prof, sl_bckg_prof)
+
+
+        signal = np.round(sl_targ_prof+sl_bckg_prof)
+
+        targ_noise = np.random.normal(0., 1., sl_targ_prof.shape)*np.sqrt(sl_targ_prof)
+        bckg_noise = np.random.normal(0., 1., sl_bckg_prof.shape)*np.sqrt(sl_bckg_prof)
+        dsignal = targ_noise+bckg_noise
+        noise = np.sqrt(targ_noise**2 + bckg_noise**2 + self.dark**2 + self.ron**2)
+        #print(np.mean(dsignal))
+    
+        
+        #self.signal[:,xcen-self.sl_hlength:xcen+self.sl_hlength] = signal
+        self.signal[:,xcen-self.sl_hlength:xcen+self.sl_hlength][:,:,self.arm_counter] = signal
+        self.dsignal[:,xcen-self.sl_hlength:xcen+self.sl_hlength][:,:,self.arm_counter] = dsignal
+        self.noise[:,xcen-self.sl_hlength:xcen+self.sl_hlength][:,:,self.arm_counter] = noise
+
+
+
+        #return sl_hlength, sl_trace, sl_norm, np.mean(signal)
+        return sl_trace, sl_targ, np.mean(signal)
+
+
+    def add_slices(self, xcen, xshift, xspan, psf_xlength, wmin, wmax, wmin_d,
+                   wmax_d, arm):
+
+        xcens = range(xcen-xshift, xcen+xshift, xspan)
+
+        for s, (c, t, t_t, t_b) in enumerate(zip(xcens[1:], self.psf.traces, self.psf.traces_targ, self.psf.traces_bckg)):
+            print("Projecting slice %i onto arm %i..." % (s, arm), end='\r')
+
+            _, _, sl_msignal = self.add_slice(t, t_t, t_b, c, wmin, wmax, wmin_d, wmax_d)
+
+            self.mod_init.append(
+                Gaussian1D(amplitude=sl_msignal, mean=c, stddev=psf_xlength))
+            self.sl_cen.append(c)
+            
+
+    def draw(self):
+        fig_p, self.ax_p = plt.subplots(figsize=(10,7))
+        self.ax_p.set_title("Photon balance (CCD)")
+        sl_v = np.array([self.spec.targ_tot.value, np.sum(self.psf.targ_slice.value), 
+                         np.sum(self.psf.z_targ.value)-np.sum(self.psf.targ_slice.value),
+                         self.targ_sum.value, np.sum(self.psf.z_targ.value)-self.targ_sum.value])
+        sl_l = ["target: %2.3e %s"  % (sl_v[0], self.spec.targ_tot.unit), 
+                "on slit: %2.3e %s"  % (sl_v[1], self.psf.z_targ.unit), 
+                "off slit: %2.3e %s"  % (sl_v[2], self.psf.z_targ.unit),
+                "on CCD: %2.3e %s"  % (sl_v[3], self.targ_sum.unit), 
+                "off CCD: %2.3e %s"  % (sl_v[4], self.targ_sum.unit)] 
+        sl_c = ['C0', 'C0', 'C0', 'C0', 'C0']
+        p0 = self.ax_p.pie([sl_v[0]], colors=[sl_c[0]], startangle=90, radius=1,
+                      wedgeprops=dict(width=0.2, edgecolor='w'))
+        p1 = self.ax_p.pie(sl_v[1:3], colors=sl_c[1:3], startangle=90, radius=0.8,
+                           wedgeprops=dict(width=0.2, edgecolor='w'))
+        p2 = self.ax_p.pie(sl_v[3:], colors=sl_c[3:], autopct='%1.1f%%', startangle=90, radius=0.6, 
+                           wedgeprops=dict(width=0.2, edgecolor='w'))
+        p1[0][0].set_alpha(2/3)
+        p1[0][1].set_alpha(1/6)
+        p2[0][0].set_alpha(1/3)
+        p2[0][1].set_alpha(1/6)
+        self.ax_p.legend([p0[0][0],p1[0][0],p2[0][0]], [sl_l[0]]+sl_l[1::2])
+
+
+        fig_s, self.ax_s = plt.subplots(figsize=(10,7))
+        self.ax_s.set_title("Arm range and sampling")
+        for i in range(arm_n):
+            self.ax_s.plot(self.spec.arm_wave[i], self.spec.fwhm[i], label='Arm %i (resol: %2.3e)' % (i, resol[i]))
+            self.ax_s.set_xlabel('Wavelength (%s)' % au.nm)
+            self.ax_s.set_ylabel('FWHM (1/%s)' % au.pixel)
+        self.ax_s.axhline(2.0, linestyle=':')
+        self.ax_s.text(np.min(self.spec.arm_wave[0]), 2.0, "Nyquist limit", ha='left', va='bottom')
+        self.ax_s.legend()
+
+        fig_b, self.ax_b = plt.subplots(figsize=(7,7))
+        self.ax_b.set_title("Noise breakdown")
+        x = np.arange(arm_n)
+        self.ax_b.bar(x-0.3, self.targ_noise_max.value, width=0.2, label='Target (maximum)')
+        self.ax_b.bar(x-0.1, self.bckg_noise_med.value, width=0.2, label='Background (median)')
+        self.ax_b.bar(x+0.1, self.dark, width=0.2, label='Dark')
+        self.ax_b.bar(x+0.3, self.ron, width=0.2, label='Read-out')
+        self.ax_b.set_xlabel('Arm')
+        self.ax_b.set_ylabel('Noise (%s)' % self.targ_noise_max.unit)
+        self.ax_b.set_xticks(range(arm_n))
+        self.ax_b.legend()
+        #self.ax_b.set_xlabels(range(arm_n)+1)
+
+
+
+        image = np.zeros(self.image.shape)
+        thres = np.infty
+        image[self.image > thres] = thres
+        image[self.image < thres] = self.image[self.image < thres]
+
+        for i in range(arm_n):
+            #if fig is None:
+            fig, self.ax = plt.subplots(figsize=(8,8))
+            divider = make_axes_locatable(self.ax)
+            cax = divider.append_axes('right', size='5%', pad=0.1)
+            im = self.ax.imshow(image[:,:,i], vmin=0)
+            self.ax.set_title('CCD')
+            self.ax.set_xlabel('X')
+            self.ax.set_ylabel('Y')
+            self.ax.text(0.025, 0.025, "Total: %1.3e %s"
+                         % (np.sum(self.signal), au.photon),
+                         ha='left', va='bottom', color='white',
+                         transform=self.ax.transAxes)
+            cax.xaxis.set_label_position('top')
+            cax.set_xlabel(au.ph)
+            fig.colorbar(im, cax=cax, orientation='vertical')
+
+    def extr_arms(self, n, slice_n):
+        wave_snr = np.arange(self.wmins[0].value, self.wmaxs[-1].value, snr_sampl.value)
+        self.spec.wave_snr = wave_snr
+        for a in range(n):
+            wave_extr = self.wave_grid(self.wmins[a], self.wmaxs[a])
+            flux_extr = 0
+            err_extr = 0
+            b = []
+            for s in range(slice_n):
+                print("Extracting slice %i from arm %i..." % (s, a), end='\r')
+                i = a*slice_n+s
+                x = range(self.sl_cen[i]-self.sl_hlength,
+                          self.sl_cen[i]+self.sl_hlength)
+                s_extr = np.empty(int(self.ysize.value))
+                n_extr = np.empty(int(self.ysize.value))
+                for p in range(int(self.ysize.value)):
+                    y = self.image[p, self.sl_cen[i]-self.sl_hlength:
+                                      self.sl_cen[i]+self.sl_hlength, a]
+                    b1 = np.median(self.image[p, self.sl_cen[i]-self.sl_hlength+1:
+                                              self.sl_cen[i]-self.sl_hlength+6, a])
+                    b2 = np.median(self.image[p, self.sl_cen[i]+self.sl_hlength-6:
+                                              self.sl_cen[i]+self.sl_hlength-1, a])
+                    b.append(0.5*(b1+b2))
+                    y = y - b[-1]
+                    dy = self.noise[p, self.sl_cen[i]-self.sl_hlength:
+                                      self.sl_cen[i]+self.sl_hlength, a]
+                    s_extr[p], n_extr[p] = getattr(self, 'extr_'+self.func)\
+                        (y, dy=dy, mod=self.mod_init[i], x=x, p=p)
+                flux_extr += s_extr
+                err_extr = np.sqrt(err_extr**2 + n_extr**2)
+                #print(flux_extr, err_extr)
+
+            dw = (wave_extr[2:]-wave_extr[:-2])*0.5
+            dw = np.append(dw[:1], dw)
+            dw = np.append(dw, dw[-1:])
+            #print(np.mean(b), np.median(b))
+
+            flux_extr = flux_extr / dw
+            err_extr = err_extr / dw
+            
+            """
+            print("Median error of extraction: %2.3e" % np.nanmedian(err_extr))
+            flux_window = flux_extr#[3000//ccd_xbin:3100//ccd_ybin]
+            print("RMS of extraction: %2.3e"
+                  % np.sqrt(np.nanmean(np.square(
+                            flux_window-np.nanmean(flux_window)))))
+            """
+            
+            #wave_snr = wave_extr[::snr_sampl]
+            snr_extr = flux_extr/err_extr
+            snr_extr[np.where(np.isnan(snr_extr))] = 0
+            snr_extr[np.where(np.isinf(snr_extr))] = 0
+            snr_spl = cspline(wave_extr, snr_extr)(wave_snr)
+            snr_spl[wave_snr<self.wmins[a].value] = 0.0
+            snr_spl[wave_snr>self.wmaxs[a].value] = 0.0
+            if a == 0:
+                self.spec.snr = snr_spl
+                """
+                line.set_label('Extracted')
+                """
+            else:
+                self.spec.snr = np.sqrt(self.spec.snr**2+snr_spl**2)
+            #snr = uspline(wave_extr, snr_extr)(wave_snr)
+
+            if a==0:
+                self.spec.wave_extr = np.array(wave_extr)
+                self.spec.flux_extr = np.array(flux_extr)
+                self.spec.err_extr = np.array(err_extr)
+
+            else:
+                self.spec.wave_extr = np.vstack((self.spec.wave_extr, wave_extr))
+                self.spec.flux_extr = np.vstack((self.spec.flux_extr, flux_extr))
+                self.spec.err_extr = np.vstack((self.spec.err_extr, err_extr))
+
+
+            
+            """
+            linet, = self.spec.ax_snr.plot(wave_snr, snr, c='black')
+
+            if a == 0:
+                line.set_label('Extracted')
+                linet.set_label('SNR')
+                self.spec.ax_snr.text(self.wmaxs[2].value, 0,
+                                      "Median SNR: %2.1f" % np.median(snr),
+                                      ha='right', va='bottom')
+            self.spec.ax_snr.legend(loc=2)
+            """
+        """
+        linet, = self.spec.ax_snr.plot(wave_snr, snr, linestyle='--', c='black')
+        linet.set_label('SNR')
+        self.spec.ax_snr.text(0.99, 0.92,
+                              "Median SNR: %2.1f" % np.median(snr),
+                              ha='right', va='top',
+                              transform=self.spec.ax_snr.transAxes)
+        self.spec.ax_snr.legend(loc=2, fontsize=8)
+        """
+        print("Slices extracted from arms.       ")
+
+        #print(len(self.spec.flux_extr))
+        self.spec.flux_extr = self.spec.flux_extr.value * au.ph
+        #flux_final = self.spec.flux_extr
+        self.spec.flux_final_tot = np.sum([np.sum(f)/len(f) * (M-m) 
+                                           for f, M, m in zip(self.spec.flux_extr.value, self.wmaxs.value, self.wmins.value)])
+        self.spec.flux_final_tot = self.spec.flux_final_tot * au.ph
+        """
+        print("Flux extracted:                          ")
+        print(" from target: %2.3e %s" % (flux_final_tot, flux_final.unit))
+        """
+
+    def extr_sum(self, y, dy, **kwargs):
+        sel = np.s_[self.sl_hlength-self.psf_xlength
+                    :self.sl_hlength+self.psf_xlength]
+        ysel = y[sel]
+        dysel = dy[sel]
+        s = np.sum(ysel)
+        n = np.sqrt(np.sum(dysel**2))
+        if np.isnan(s) or np.isnan(n) or np.isinf(s) or np.isinf(n) \
+            or np.abs(s) > 1e30 or np.abs(n) > 1e30:
+            s = 0
+            n = 1
+        return s, n
+
+    
+    def extr_opt(self, y, dy, mod, x, p):
+        mod_fit = lm()(mod, x, y)(x)
+        mod_fit[mod_fit < 1e-3] = 0
+        if np.sum(mod_fit*dy) > 0 and not np.isnan(mod_fit).any():
+            mod_norm = mod_fit/np.sum(mod_fit)
+            #print(mod_fit)
+            w = dy>0
+            s = np.sum(mod_norm[w]*y[w]/dy[w]**2)/np.sum(mod_norm[w]**2/dy[w]**2)
+            n = np.sqrt(np.sum(mod_norm[w])/np.sum(mod_norm[w]**2/dy[w]**2))
+        else:
+            s = 0
+            n = 1
+        if np.isnan(s) or np.isnan(n) or np.isinf(s) or np.isinf(n) \
+            or np.abs(s) > 1e30 or np.abs(n) > 1e30:
+            s = 0
+            n = 1
+        return s, n
+
+    
+    def rebin(self, arr, length):
+        # Adapted from http://www.bdnyc.org/2012/03/rebin-numpy-arrays-in-python/
+        #pix_length = length/self.spat_scale/self.pix_xsize
+        # Good for now, but need to find more sophisticated solution
+        zoom_factor = length / arr.shape[0]
+        new = interpolation.zoom(arr, zoom_factor)
+        if np.sum(new) != 0:
+            return new/np.sum(new)*np.sum(arr)
+        else:
+            return new
+
+
+    def tot_eff(self, wave, wmin_d, wmax_d, fact=2):
+        dch_shape = expit(fact*(wave-wmin_d))*expit(fact*(wmax_d-wave))
+        i = self.arm_counter
+        adc = eff_adc[i]
+        slc = eff_slc[i]
+        dch = dch_shape * eff_dch[i]
+        spc = eff_spc[i]
+        grt = eff_grt[i]
+        ccd = eff_ccd[i]
+        tel = eff_tel[i]
+        #return dch_shape
+        return adc * slc * dch * spc * grt * ccd * tel
+
+    
+    def wave_grid(self, wmin, wmax):
+        return np.linspace(wmin, wmax, int(self.ysize.value))
+
+
+class Photons(object):
+
+    def __init__(self, targ_mag=targ_mag, bckg_mag=bckg_mag, area=area,
+                 texp=texp):
+        self.targ_mag = targ_mag
+        self.bckg_mag = bckg_mag
+        self.area = area #(400*au.cm)**2 * np.pi
+        self.texp = texp
+        """
+        if mag_syst == 'Vega':
+            self.wave_ref = wave_U
+            self.flux_ref = flux_U
+        if mag_syst == 'AB':
+            self.wave_ref = wave_u
+            self.flux_ref = flux_u
+        """
+        self.wave_ref = globals()['wave_ref_'+mag_syst][mag_band]
+        self.flux_ref = globals()['flux_ref_'+mag_syst][mag_band]
+
+        f = self.flux_ref * self.area * texp  # Flux density @ 555.6 nm, V = 0
+        self.targ = f * pow(10, -0.4*self.targ_mag)
+        self.bckg = f * pow(10, -0.4*self.bckg_mag) / au.arcsec**2
+
+        self.atmo()
+        print("Photons collected.")
+
+
+        
+    def atmo(self):
+        data = fits.open('database/atmoexan.fits')[1].data
+        self.atmo_wave = data['LAMBDA']*0.1 * au.nm
+        self.atmo_ex = data['LA_SILLA']
+
+
+class PSF(object):
+
+    def __init__(self, spec, seeing=seeing, slice_width=slice_width,
+                 xsize=slice_length, ysize=slice_length, sampl=psf_sampl,
+                 func=psf_func):
+        #self.phot = phot
+        self.spec = spec
+        self.seeing = seeing
+        self.slice_width = slice_width
+        self.xsize = xsize
+        self.ysize = ysize
+        self.area = xsize * ysize
+        self.sampl = sampl
+        self.func = func
+        self.rects = []
+        x = np.linspace(-xsize.value/2, xsize.value/2, int(sampl.value))
+        y = np.linspace(-ysize.value/2, ysize.value/2, int(sampl.value))
+        self.x, self.y = np.meshgrid(x, y)
+
+        getattr(self, func)()  # Apply the chosen function for the PSF
+
+        self.z_norm = self.z/np.sum(self.z)
+
+
+        """ Deprecated
+        self.bckg = np.ones(self.spec.wave.shape) \
+                    * self.spec.phot.bckg * self.area
+        self.bckg_int = np.sum(self.bckg)/len(self.bckg) \
+                        * (self.spec.wmax-self.spec.wmin)
+        
+        self.z = self.z/np.sum(self.z)  # Normalize the counts
+        self.z_targ = self.z * self.spec.targ_int  # Counts from the target
+        self.z_bckg = np.full(self.z.shape, self.bckg_int.value) / self.z.size \
+                      * self.bckg_int.unit  # Counts from the background
+        self.z = self.z_targ + self.z_bckg  # Total counts
+        """
+    
+        self.z_norm_a = np.ones(self.z.shape)/self.z.size
+        self.z_targ = self.z_norm * self.spec.targ_tot  # Counts from the target
+        self.z_bckg = self.z_norm_a * self.spec.bckg_tot*self.area  # Counts from the background
+        self.z = self.z_targ + self.z_bckg
+        self.spec.z_targ = self.z_targ
+        #print("Flux within the field:")
+        #print(" from target: %2.3e %s" % (np.sum(self.z_targ.value), self.z_targ.unit))
+        #print(" from background: %2.3e %s" % (np.sum(self.z_bckg.value), self.z_bckg.unit))
+        
+        
+    def add_slice(self, cen=None):  # Central pixel of the slice
+
+        width = self.slice_width
+        length = self.ysize
+        if cen == None:
+            cen = (0, 0)
+        hwidth = width.value / 2
+        hlength = length.value / 2
+
+        rect = patches.Rectangle((cen[0]-hwidth, cen[1]-hlength), width.value,
+                                 length.value, edgecolor='r', facecolor='none')
+        self.rects.append(rect)
+
+        # In this way, fractions of pixels in the slices are counted
+        ones = np.ones(self.x.shape)
+        self.pix_xsize = self.xsize / self.sampl
+        self.pix_ysize = self.ysize / self.sampl
+        left_dist = (self.x-cen[0]+hwidth) / self.pix_xsize.value
+        right_dist = (cen[0]+hwidth-self.x) / self.pix_xsize.value
+        down_dist = (self.y-cen[1]+hlength) / self.pix_ysize.value
+        up_dist = (cen[1]+hlength-self.y) / self.pix_ysize.value
+        
+        # This mask gives half weight to the edge pixels, to avoid superposition issues
+        mask_left = np.maximum(-ones, np.minimum(ones, left_dist))*0.5+0.5
+        mask_right = np.maximum(-ones, np.minimum(ones, right_dist))*0.5+0.5
+        mask_down = np.maximum(-ones, np.minimum(ones, down_dist))*0.5+0.5
+        mask_up = np.maximum(-ones, np.minimum(ones, up_dist))*0.5+0.5
+        mask = mask_left*mask_right*mask_down*mask_up
+        cut = np.asarray(mask_down*mask_up>0).nonzero()
+
+        mask_z = self.z * mask
+        mask_z_targ = self.z_targ * mask
+        mask_z_bckg = self.z_bckg * mask
+
+        cut_shape = (int(len(cut[0])/mask_z.shape[1]), mask_z.shape[1])
+        cut_z = mask_z[cut].reshape(cut_shape)
+        cut_z_targ = mask_z_targ[cut].reshape(cut_shape)
+        cut_z_bckg = mask_z_bckg[cut].reshape(cut_shape)
+    
+        flux = np.sum(mask_z)
+        flux_targ = np.sum(mask_z_targ)
+        flux_bckg = np.sum(mask_z_bckg)
+        trace = np.sum(cut_z, axis=1)
+        trace_targ = np.sum(cut_z_targ, axis=1)
+        trace_bckg = np.sum(cut_z_bckg, axis=1)
+
+
+        return flux, flux_targ, flux_bckg, trace, trace_targ, trace_bckg
+
+    
+    def add_slices(self, n=slice_n, cen=None):
+
+        width = self.slice_width
+        length = self.ysize
+        if cen == None:
+            cen = (0,0)
+        hwidth = width.value / 2
+        hlength = length.value / 2
+        shift = ((n+1)*width.value)/2
+        cens = np.arange(cen[0]-shift, cen[0]+shift, width.value)
+        self.flux_slice = 0.
+        self.flux_targ_slice = 0.
+        self.flux_bckg_slice = 0.
+        for i, c in enumerate(cens[1:]):
+            print("Designing slice %i on field..." % i, end='\r')
+
+            flux, flux_targ, flux_bckg, trace, trace_targ, trace_bckg = self.add_slice((c, cen[1]))
+            self.flux_slice += flux
+            self.flux_targ_slice += flux_targ
+            self.flux_bckg_slice += flux_bckg
+            if i == 0:
+                self.fluxes = np.array([flux.value])
+                self.fluxes_targ = np.array([flux_targ.value])
+                self.fluxes_bckg = np.array([flux_bckg.value])
+                self.traces = [trace]
+                self.traces_targ = [trace_targ]
+                self.traces_bckg = [trace_bckg]
+            else:
+                self.fluxes = np.append(self.fluxes, flux.value)
+                self.fluxes_targ = np.append(self.fluxes_targ, flux_targ.value)
+                self.fluxes_bckg = np.append(self.fluxes_bckg, flux_bckg.value)
+                self.traces = np.vstack((self.traces, trace))
+                self.traces_targ = np.vstack((self.traces_targ, trace_targ))
+                self.traces_bckg = np.vstack((self.traces_bckg, trace_bckg))
+        print("Slices designed on field.     ")
+
+
+    
+        self.slice_area = min((n * width-self.pix_xsize*au.pixel) * (length-self.pix_ysize*au.pixel), 
+                              (n * width-self.pix_xsize*au.pixel) * (self.ysize-self.pix_ysize*au.pixel))
+        self.slice_area = min(n*width*length, n*width*self.ysize)
+        #self.bckg_slice = self.bckg_int * self.slice_area/self.area
+        self.bckg_slice = self.flux_bckg_slice
+        self.targ_slice = self.flux_slice-self.bckg_slice
+        self.spec.targ_slice = self.targ_slice
+        self.losses = 1-(self.flux_targ_slice.value)/np.sum(self.z_targ.value)
+        #print("Flux within the slit:")
+        #print(" from target: %2.3e %s (losses: %2.1f%%)" \
+        #      % (np.sum(self.targ_slice.value), self.targ_slice.unit, 100*self.losses))
+        #print(" from background: %2.3e %s" % (np.sum(self.bckg_slice.value), self.bckg_slice.unit))
+
+        
+        # Update spectrum with flux into slices and background
+        #self.spec.targ_loss = self.spec.targ*(1-self.losses)
+        if self.func == 'gaussian':#or 1==0:
+            """
+            self.spec.targ_conv = gaussian_filter(
+                self.spec.targ_loss, self.sigma.value)*self.spec.targ_loss.unit
+            self.spec.norm_conv = gaussian_filter(
+                self.spec.norm, self.sigma.value)*self.spec.targ_loss.unit
+            """
+            self.spec.targ_conv = gaussian_filter(
+                self.spec.targ_ext, self.sigma.value)*self.spec.targ_ext.unit
+            self.spec.bckg_conv = gaussian_filter(
+                self.spec.bckg_ext, self.sigma.value)*self.spec.bckg_ext.unit
+
+
+
+        else:
+            """
+            self.spec.targ_conv = self.spec.targ_loss
+            self.spec.norm_conv = self.spec.norm
+            """
+            self.spec.targ_conv = self.spec.targ_ext#*(1-self.losses)
+            self.spec.bckg_conv = self.spec.bckg_ext
+        
+            
+    def draw(self):
+        """
+        fig_p, self.ax_p = plt.subplots(1, 3, figsize=(15,5))
+        self.ax_p[1].set_title("Photon balance (field)")
+        sl_v0 = [np.sum(self.z_targ.value), np.sum(self.z_bckg.value)]
+        sl_l0 = ["target\n%2.3e %s"  % (sl_v0[0], self.z_targ.unit), 
+                 "background\n%2.3e %s" % (sl_v0[1], self.z_bckg.unit)]
+        sl_c0 = ['C0', 'C1']
+        p0 = self.ax_p[0].pie(sl_v0, labels=sl_l0, colors=sl_c0, autopct='%1.1f%%', startangle=90, radius=1, 
+                       wedgeprops=dict(width=0.2, edgecolor='w'))
+
+        sl_v1 = [np.sum(self.targ_slice.value), np.sum(self.z_targ.value)-np.sum(self.targ_slice.value)]
+        sl_l1 = ["target in slit\n%2.3e %s"  % (sl_v1[0], self.z_targ.unit), 
+                 "target off slit\n%2.3e %s" % (sl_v1[1], self.z_bckg.unit)]
+        sl_c1 = ['C0', 'C0']
+        p1 = self.ax_p[1].pie(sl_v1, labels=sl_l1, colors=sl_c1, autopct='%1.1f%%', startangle=90, radius=1, 
+                            wedgeprops=dict(width=0.2, edgecolor='w'))
+        p1[0][1].set_alpha(1/3)
+        
+        sl_v2 = [np.sum(self.bckg_slice.value), np.sum(self.z_bckg.value)-np.sum(self.bckg_slice.value)]
+        sl_l2 = ["background in slit\n%2.3e %s"  % (sl_v2[0], self.z_targ.unit), 
+                 "background off slit\n%2.3e %s" % (sl_v2[1], self.z_bckg.unit)]
+        sl_c2 = ['C1', 'C1']
+        p2 = self.ax_p[2].pie(sl_v2, labels=sl_l2, colors=sl_c2, autopct='%1.1f%%', startangle=90, radius=1, 
+                            wedgeprops=dict(width=0.2, edgecolor='w'))
+        p2[0][1].set_alpha(1/3)
+        """
+
+        fig_p, self.ax_p = plt.subplots(figsize=(10,7))
+        self.ax_p.set_title("Photon balance (slit)")
+        sl_v = np.array([self.spec.targ_tot.value, np.sum(self.targ_slice.value), 
+                         np.sum(self.z_targ.value)-np.sum(self.targ_slice.value)])
+        sl_l = ["total: %2.3e %s"  % (sl_v[0], self.spec.targ_tot.unit), 
+                "on slit: %2.3e %s"  % (sl_v[1], self.z_targ.unit), 
+                "off slit: %2.3e %s"  % (sl_v[2], self.z_targ.unit)] 
+        sl_c = ['C0', 'C0', 'C0']
+        p0 = self.ax_p.pie([sl_v[0]], colors=[sl_c[0]], startangle=90, radius=1,
+                      wedgeprops=dict(width=0.2, edgecolor='w'))
+        p1 = self.ax_p.pie(sl_v[1:], colors=sl_c[1:], autopct='%1.1f%%', startangle=90, radius=0.8,
+                          wedgeprops=dict(width=0.2, edgecolor='w'))
+        p1[0][0].set_alpha(1/2)
+        p1[0][1].set_alpha(1/6)
+        self.ax_p.legend([p0[0][0],p1[0][0]], [sl_l[0]]+sl_l[1::2])
+
+        
+        """
+        sl_v = np.array([[np.sum(self.targ_slice.value), np.sum(self.z_targ.value)-np.sum(self.targ_slice.value)],
+                         [np.sum(self.bckg_slice.value), np.sum(self.z_bckg.value)-np.sum(self.bckg_slice.value)]])
+        sl_l = ["target (in slit)\n%2.3e %s"  % (sl_v[0][0], self.z_targ.unit), 
+                "target (off slit)\n%2.3e %s"  % (sl_v[0][1], self.z_targ.unit),
+                "background (in slit)\n%2.3e %s" % (sl_v[1][0], self.z_bckg.unit),
+                "background (off slit)\n%2.3e %s" % (sl_v[1][1], self.z_bckg.unit)] 
+
+        sl_c = ['C0', 'C0', 'C1', 'C1']
+        p = self.ax_p.pie(sl_v.flatten(), labels=sl_l, colors=sl_c, autopct='%1.1f%%', startangle=90, radius=0.8,
+                      wedgeprops=dict(width=0.2, edgecolor='w'))
+        p[0][0].set_alpha(2/3)
+        p[0][1].set_alpha(1/3)
+        p[0][2].set_alpha(2/3)
+        p[0][3].set_alpha(1/3)
+        """
+        #print("Flux within the slit:")
+        #print(" from target: %2.3e %s (losses: %2.1f%%)" \
+        #      % (np.sum(self.targ_slice.value), self.targ_slice.unit, 100*self.losses))
+        #print(" from background: %2.3e %s" % (np.sum(self.bckg_slice.value), self.bckg_slice.unit))
+
+
+        
+    
+        fig, self.ax = plt.subplots(figsize=(8,8))
+        divider = make_axes_locatable(self.ax)
+        cax = divider.append_axes('right', size='5%', pad=0.1)
+        im = self.ax.contourf(self.x, self.y, self.z, 100, vmin=0)
+        for rect in self.rects:
+            self.ax.add_patch(rect)
+        self.ax.set_title('PSF')
+        self.ax.set_xlabel('X (%s)' % self.xsize.unit)
+        self.ax.set_ylabel('Y (%s)' % self.xsize.unit)
+        """
+        self.ax.text(-self.xsize.value/2*0.95, -self.ysize.value/2*0.63,
+                     "FWHM: %3.2f arcsec" % self.fwhm, ha='left', va='bottom',
+                     color='white')
+        self.ax.text(-self.xsize.value/2*0.95, -self.ysize.value/2*0.71,
+                     "Total: %2.3e %s"
+                     % (self.flux_slice.value, self.flux_slice.unit),
+                     ha='left', va='bottom', color='white')
+        self.ax.text(-self.xsize.value/2*0.95, -self.ysize.value/2*0.79,
+                     "Target: %2.3e %s"
+                     % (self.targ_slice.value, self.targ_slice.unit),
+                     ha='left', va='bottom', color='white')
+        self.ax.text(-self.xsize.value/2*0.95, -self.ysize.value/2*0.87,
+                     "Sky: %2.3e %s"
+                     % (np.sum(self.bckg_slice.value), self.bckg_slice.unit),
+                     ha='left', va='bottom', color='white')
+        self.ax.text(-self.xsize.value/2*0.95, -self.ysize.value/2*0.95,
+                     "Losses: %2.1f%%" \
+                     % (self.losses*100),
+                     ha='left', va='bottom', color='white')
+        """
+        cax.xaxis.set_label_position('top')
+        cax.set_xlabel('Photon')
+        fig.colorbar(im, cax=cax, orientation='vertical')
+
+
+    def gaussian(self, cen=psf_cen):
+        ampl = 1
+        theta = 0
+        sigma = self.seeing.value/2 / np.sqrt(2*np.log(2))
+        m = Gaussian2D(ampl, cen[0], cen[1], sigma, sigma, theta)
+        self.z = m.evaluate(self.x, self.y, ampl, cen[0], cen[1], sigma, sigma,
+                            theta)
+        self.sigma = m.x_stddev
+        self.fwhm = m.x_fwhm
+
+
+    def moffat(self, cen=psf_cen):
+        ampl = 1
+        alpha = 3
+        gamma = self.seeing.value/2 / np.sqrt(2**(1/alpha)-1)
+        m = Moffat2D(1, cen[0], cen[1], gamma, alpha)
+        self.z = m.evaluate(self.x, self.y, ampl, cen[0], cen[1], gamma,
+                            alpha)
+        self.fwhm = m.fwhm
+
+
+    def tophat(self, cen=(0,0)):
+        self.z = np.array((self.x-cen[0])**2 + (self.y-cen[1])**2
+                          < (self.seeing.value/2)**2, dtype=int)
+        self.fwhm = self.seeing.value
+
+
+class Spec(object):
+
+#    def __init__(self, phot, file=None, wmin=317.142*au.nm, wmax=378.268*au.nm,
+    def __init__(self, phot, file=None, wmin=300*au.nm, wmax=410*au.nm,
+                 dw=1e-3*au.nm, templ=spec_templ):
+        self.phot = phot
+        self.file = file
+        self.wmin = wmin
+        self.wmax = wmax
+        self.wmean = 0.5*(wmin+wmax)
+        self.wave = np.arange(wmin.value, wmax.value, dw.value)*wmin.unit
+
+
+        try:
+            flux_bckg = self.skycalc()
+            skycalc = True
+        except:
+            skycalc = False
+        
+        
+        # Extrapolate extinction
+        spl = cspline(self.phot.atmo_wave, self.phot.atmo_ex)(self.wave)
+        self.atmo_ex = pow(10, -0.4*spl*airmass)
+
+        flux_targ = getattr(self, templ)()
+        #self.normalize(flux_targ)
+  
+        self.create(flux_targ, 'targ')
+        print("Input spectra created.")
+
+        if skycalc:
+            self.create(flux_bckg, 'bckg')
+            print("Sky spectrum imported from SkyCalc_input_NEW_Out.fits.")
+
+            
+        else:
+            self.create(np.ones(self.wave.shape), 'bckg')
+            print("Flat sky model created.")
+
+
+
+
+        #print("Flux collected by the telescope:")
+        #print(" from target: %2.3e %s" % (self.targ_tot.value, self.targ_tot.unit))
+        #print(" from background: %2.3e %s" % (self.bckg_tot.value, self.bckg_tot.unit))
+
+        
+    def create(self, flux, obj='targ'):
+        raw = flux*getattr(self.phot, obj)
+        ext = raw*self.atmo_ex
+        tot = np.sum(ext)/len(ext) * (self.wmax-self.wmin)
+        #norm = ext/np.sum(ext) / au.nm
+        setattr(self, obj+'_raw', raw)
+        setattr(self, obj+'_ext', ext)
+        setattr(self, obj+'_tot', tot)
+        #setattr(self, obj+'_norm', norm)
+
+
+    def custom(self):
+        name = self.file    
+        try:
+            data = Table(ascii.read(name, data_start=1, names=['col1', 'col2', 'col3', 'col4']))
+            wavef = data['col1']*0.1 * au.nm
+            fluxf = data['col2']
+            
+        except:
+            data = Table(ascii.read(name, data_start=2, names=['col1', 'col2'], format='no_header')[2:], 
+                         dtype=(float, float))#name)
+            wavef = data['col1']*0.1 * au.nm
+            fluxf = data['col2']
+        if qso_zem != None:
+            wavef = wavef*(1+qso_zem)
+        spl = cspline(wavef, fluxf)(self.wave.value)
+        spl = spl/cspline(wavef, fluxf)(self.phot.wave_ref)
+        flux = spl #* au.photon/au.nm
+        return flux #* self.atmo_ex
+
+    
+    def draw_in(self, bckg=True, show=True):    
+
+        if bckg:
+            fig_p, self.ax_p = plt.subplots(figsize=(10,7))
+            self.ax_p.set_title("Photon balance (telescope)")
+            sl_v = [self.targ_tot.value, self.bckg_tot.value]
+            sl_l = ["target: %2.3e %s"  % (sl_v[0], self.targ_tot.unit), 
+                    "background: %2.3e %s" % (sl_v[1], self.bckg_tot.unit)]
+            sl_c = ['C0', 'C1']
+            p = self.ax_p.pie(sl_v, colors=sl_c, autopct='%1.1f%%', startangle=90, 
+                          wedgeprops=dict(width=0.2, edgecolor='w'))
+            self.ax_p.legend(p[0], sl_l)
+
+        fig, self.ax = plt.subplots(figsize=(10,5))
+        self.ax.set_title("Spectrum")
+        self.ax.plot(self.wave, self.targ_raw, label='Target raw')
+        self.ax.plot(self.wave, self.targ_ext, label='Target extincted', linestyle='--', c='C0')
+        if bckg: self.ax.plot(self.wave, self.bckg_raw, label='Background (per arcsec2)')
+        
+        self.ax.set_xlabel('Wavelength (%s)' % self.wave.unit)
+        self.ax.set_ylabel('Flux density\n(%s)' % self.targ_raw.unit)
+        self.ax.grid(linestyle=':')
+            
+        if show: 
+            self.ax.legend(loc=2, fontsize=8)
+            plt.show()
+
+
+        
+    def draw(self):
+        fig_p, self.ax_p = plt.subplots(figsize=(7,7))
+        self.ax_p.set_title("Photon balance (CCD)")
+        sl_v = np.array([self.targ_tot.value, np.sum(self.targ_slice.value), 
+                         np.sum(self.z_targ.value)-np.sum(self.targ_slice.value),
+                         self.targ_sum.value, np.sum(self.z_targ.value)-self.targ_sum.value,
+                         self.flux_final_tot.value, np.sum(self.z_targ.value)-self.flux_final_tot.value])
+        sl_l = ["target: %2.3e %s"  % (sl_v[0], self.targ_tot.unit), 
+                "on slit: %2.3e %s"  % (sl_v[1], self.z_targ.unit), 
+                "off slit: %2.3e %s"  % (sl_v[2], self.z_targ.unit),
+                "on CCD: %2.3e %s"  % (sl_v[3], self.targ_sum.unit), 
+                "off CCD: %2.3e %s"  % (sl_v[4], self.targ_sum.unit),
+                "extracted: %2.3e %s"  % (sl_v[5], self.flux_final_tot.unit), 
+                "missed: %2.3e %s"  % (sl_v[6], self.flux_final_tot.unit)] 
+        sl_c = ['C0', 'C0', 'C0', 'C0', 'C0', 'C0', 'C0']
+        p0 = self.ax_p.pie([sl_v[0]], colors=[sl_c[0]], startangle=90, radius=1,
+                      wedgeprops=dict(width=0.2, edgecolor='w'))
+        p1 = self.ax_p.pie(sl_v[1:3], colors=sl_c[1:3], startangle=90, radius=0.8,
+                           wedgeprops=dict(width=0.2, edgecolor='w'))
+        p2 = self.ax_p.pie(sl_v[3:5], colors=sl_c[3:5], startangle=90, radius=0.6, 
+                           wedgeprops=dict(width=0.2, edgecolor='w'))
+        p3 = self.ax_p.pie(sl_v[5:], colors=sl_c[5:], autopct='%1.1f%%', startangle=90, radius=0.4, 
+                           wedgeprops=dict(width=0.2, edgecolor='w'))
+        p1[0][0].set_alpha(3/4)
+        p1[0][1].set_alpha(1/6)
+        p2[0][0].set_alpha(2/4)
+        p2[0][1].set_alpha(1/6)
+        p3[0][0].set_alpha(1/4)
+        p3[0][1].set_alpha(1/6)
+        self.ax_p.legend([p0[0][0],p1[0][0],p2[0][0],p3[0][0]], [sl_l[0]]+sl_l[1::2])
+
+
+        self.draw_in(bckg=False, show=False)
+        #fig = plt.figure(figsize=(8,8))
+        #self.ax,self.ax_snr = [plt.subplot(2,1,1), plt.subplot(2,1,2)]
+        #self.ax.get_shared_x_axes().join(self.ax, self.ax_snr)
+        self.ax.set_title("Spectrum")
+        #self.ax.plot(self.wave, self.targ/self.atmo_ex, label='Original')
+        #self.ax.plot(self.wave, self.targ, label='Extincted')
+        #self.ax.plot(self.wave, self.targ_conv, label='Collected')
+        for a in range(arm_n):
+            line1, = self.ax.plot(self.arm_wave[a], self.arm_targ[a] \
+                * self.tot_eff(self.arm_wave[a], self.m_d[a], self.M_d[a]), c='C3')
+            line2 = self.ax.scatter(self.wave_extr[a,:], self.flux_extr[a,:], s=2, c='C0')
+            line3 = self.ax.scatter(self.wave_extr[a,:], self.err_extr[a,:], s=2, c='C1')
+        line1.set_label('On detector')            
+        line2.set_label('Extracted')
+        line3.set_label('Extracted (error)')
+
+        self.ax.legend(loc=2, fontsize=8)
+        #self.ax.set_xlabel('Wavelength (%s)' % self.wave.unit)
+        #self.ax.set_ylabel('Flux density\n(%s)' % self.targ.unit)
+        #self.ax.grid(linestyle=':')
+
+        fig_snr, self.ax_snr = plt.subplots(figsize=(10,5))
+        self.ax_snr.set_title("SNR")
+        #"""
+        linet, = self.ax_snr.plot(self.wave_snr, self.snr, linestyle='--', c='black')
+        linet.set_label('SNR')
+        self.ax_snr.text(0.99, 0.92,
+                              "Median SNR: %2.1f" % np.median(self.snr),
+                              ha='right', va='top',
+                              transform=self.ax_snr.transAxes)
+        self.ax_snr.legend(loc=2, fontsize=8)
+
+        self.ax_snr.set_xlabel('Wavelength')
+        self.ax_snr.set_ylabel('SNR per pixel')
+        self.ax_snr.grid(linestyle=':')
+        #"""
+        
+    def flat(self):
+        return np.ones(self.wave.shape) * self.atmo_ex
+
+
+    def lya_abs(self, flux):
+        logN_0 = 12
+        logN_1 = 14
+        logN_2 = 18
+        logN_3 = 19
+        index = -1.65
+
+        f_0 = 1.0
+        f_1 = 1e14/np.log(1e14)
+        f_2 = np.log(1e18)/np.log(1e14)*1e5
+
+        tau_norm = 0.0028
+        tau_index = 3.45
+
+
+
+        den = (10**(logN_1*(2+index))-10**(logN_0*(2+index))) / (2+index)
+        den = den + f_1 * (10**(logN_2*(1+index)))/(1+index) * np.log(10**(logN_2)) \
+              - 1/(1+index)
+        den = den - f_1 * (10**(logN_1*(1+index)))/(1+index) * np.log(10**(logN_1)) \
+              - 1/(1+index)
+        #print(den)
+
+        corr = np.ones(len(flux))
+        z = self.wave.value/121.567 - 1
+        corr[z<qso_zem] = np.exp(-1e6*tau_norm*(1+z[z<qso_zem])**tau_index*1/den)*f_0
+        #print(np.exp(tau_norm*(1+z[z<qso_zem])**tau_index*1/den), corr)
+        return flux * corr
+
+    
+    def normalize(self, flux):
+        self.norm = flux/np.sum(flux) / au.nm
+        self.targ = flux * self.phot.targ
+        self.targ_int = np.sum(self.targ)/len(self.targ.value) \
+                        * (self.wmax-self.wmin)
+
+        
+    def PL(self, index=-1.5):
+        return (self.wave.value/self.phot.wave_ref.value)**index * self.atmo_ex
+
+    
+    def qso(self):#, name=qso_file):
+        if self.file is None:
+            name = qso_file
+        else:
+            name = self.file
+        try:
+            data = fits.open(name)[1].data
+            data = data[:-1]
+            data = data[np.logical_and(data['wave']*0.1 > self.wmin.value,
+                                       data['wave']*0.1 < self.wmax.value)]
+            wavef = data['wave']*0.1 * au.nm
+            fluxf = data['flux']
+            spl = cspline(wavef, fluxf)(self.wave.value)
+            sel = np.where(self.wave.value<313)
+            spl[sel] = 1.0
+        except:
+            print('hey')
+
+        flux = spl#/np.mean(spl) #* au.photon/au.nm
+        if qso_lya_abs:
+            flux = self.lya_abs(flux)
+        return flux * self.atmo_ex
+
+    def skycalc(self):
+        name = 'SkyCalc_input_NEW_Out.fits'   
+        data = Table.read(name)
+        #print(data.colnames)
+        wavef = data['lam'] * au.nm
+        fluxf = data['flux'] * (4)**2 * np.pi / 1e3
+        atmo_trans = data['trans']
+        self.phot.atmo_wave = wavef
+        self.phot.atmo_ex = (1-atmo_trans)
+        spl = cspline(wavef, fluxf)(self.wave.value)
+        #spl = spl/cspline(wavef, fluxf)(self.phot.wave_ref)
+        flux = spl #* au.photon/au.nm
+        return flux
+
+    
+    def star(self):#, name=star_file):
+        if self.file is None:
+            name = star_file
+        else:
+            name = self.file
+        data = Table(ascii.read(name, data_start=2, names=['col1', 'col2'], format='no_header')[2:], dtype=(float, float))#name)
+        wavef = data['col1']*0.1 * au.nm
+        fluxf = data['col2']
+        spl = cspline(wavef, fluxf)(self.wave.value)
+        flux = spl/np.mean(spl) #* au.photon/au.nm
+        return flux * self.atmo_ex
+
+    
+class Sim():
+    
+    def __init__(self):
+        pass
+    
+
+    def check(self, start=True, *args):
+        refresh = False
+        """
+        if start: 
+            for k in self.__dict__:
+                try:
+                    r = self.__dict__[k]!=globals()[k]
+                    try:
+                        if r.size > 0: r = any(r)
+                    except:
+                        pass
+                except:
+                    pass
+                if k in globals() and r:
+                    refresh = True
+            if refresh:
+                for o in args:
+                    if hasattr(self, '_'+o):
+                        delattr(self, '_'+o)
+            self.start()
+        """
+        if start: 
+            for o in args:
+                #print(o)
+                if hasattr(self, '_'+o) and o+'_pars' in globals():
+                    for k in globals()[o+'_pars']:
+                        try:
+                            r = self.__dict__[k]!=globals()[k]
+                            try:
+                                if r.size > 0: r = any(r)
+                            except:
+                                pass
+                        except:
+                            r = False
+                        if r:
+                            refresh = True
+                    if refresh:
+                        #print(o)
+                        delattr(self, '_'+o)
+            self.start()
+
+        
+        for o in args:
+            if not hasattr(self, '_'+o):
+                getattr(self, o+'_create')()
+                
+    
+    def ccd(self):
+        self.ccd_create()
+        self.ccd_draw()
+
+
+    def ccd_create(self):            
+        self.check(True, 'phot', 'spec', 'psf')
+        self._ccd = CCD(self._psf, self._spec, xsize=ccd_xsize, ysize=ccd_ysize, xbin=ccd_xbin, ybin=ccd_ybin)
+        self._ccd.add_arms(n=arm_n, wave_d=wave_d, wave_sampl=wave_sampl, wave_d_shift=wave_d_shift)
+
+        
+    def ccd_draw(self):
+        self.check(False, 'phot', 'spec', 'psf', 'ccd')
+        self._ccd.draw()
+        plt.show()
+
+
+    def phot_create(self):
+        self.start()
+        self._phot = Photons(targ_mag=targ_mag, texp=texp)
+        
+        
+    def psf(self):
+        self.psf_create()
+        self.psf_draw()
+        
+        
+    def psf_create(self):
+        self.check(True, 'phot', 'spec')
+        self._psf = PSF(self._spec, seeing=seeing, slice_width=slice_width, xsize=slice_length,
+                        ysize=slice_length, func=psf_func)
+        self._psf.add_slices(n=slice_n)
+
+
+    def psf_draw(self):
+        self.check(False, 'phot', 'spec', 'psf')
+        self._psf.draw()        
+        plt.show()
+
+        
+    def spec_in(self):
+        self.spec_create()
+        self._spec.draw_in()
+        
+
+    def spec_create(self):
+        self.check(True, 'phot')
+        #self._spec = Spec(self._phot, file=spec_file, templ=spec_templ, wmin=self.wmins[0], wmax=self.wmaxs[-1])
+        self._spec = Spec(self._phot, file=spec_file, templ=spec_templ)
+
+
+    def spec_draw(self):
+        self.check(True, 'phot', 'spec', 'psf', 'ccd')
+        self._ccd.extr_arms(n=arm_n, slice_n=slice_n)
+        self._spec.draw()
+
+        
+        
+    def start(self):
+        for k in self.__dict__:
+            globals()[k] = self.__dict__[k]
+        
+        """
+        wmax = wave_d[0]+wave_d_shift
+        wmin = wmax-ccd_ysize/ccd_ybin*wave_sampl[0]
+        wmins = np.array([wmin.to(au.nm).value])
+        wmaxs = np.array([wmax.to(au.nm).value])
+        wmins_d = np.array([wmin.to(au.nm).value])
+        wmaxs_d = np.array([wave_d[0].to(au.nm).value])
+        for i in range(len(wave_d)): 
+            wmin = wave_d[i]-wave_d_shift
+            wmax = wmin+ccd_ysize/ccd_ybin*wave_sampl[i+1]
+            wmins = np.append(wmins, wmin.to(au.nm).value)
+            wmaxs = np.append(wmaxs, wmax.to(au.nm).value)
+            wmins_d = np.append(wmins_d, wave_d[i].to(au.nm).value)
+            try:
+                wmaxs_d = np.append(wmaxs_d, wave_d[i+1].to(au.nm).value)
+            except:
+                wmaxs_d = np.append(wmaxs_d, wmax.to(au.nm).value)
+        wmins[0] = 300
+        wmaxs[-1] = 450
+
+        wmins_d[0] = 200
+        wmaxs_d[-1] = 500
+        self.wmins = wmins * au.nm
+        self.wmaxs = wmaxs * au.nm
+        self.wmins_d = wmins_d * au.nm
+        self.wmaxs_d = wmaxs_d * au.nm
+        """
