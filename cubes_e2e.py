@@ -275,9 +275,9 @@ class CCD(object):
             bckg = self.spec.bckg_norm
 
             
-        sl_trace = self.rebin(trace.value, self.sl_hlength*2)
-        sl_trace_targ = self.rebin(trace_targ.value, self.sl_hlength*2)
-        sl_trace_bckg = self.rebin(trace_bckg.value, self.sl_hlength*2)
+        sl_trace = self.rebin(trace, self.sl_hlength*2)
+        sl_trace_targ = self.rebin(trace_targ, self.sl_hlength*2)
+        sl_trace_bckg = self.rebin(trace_bckg, self.sl_hlength*2)
         """
         sl_norm = self.rebin(norm.value, self.ysize.value)
         sl_norm_bckg = np.ones(sl_norm.shape)
