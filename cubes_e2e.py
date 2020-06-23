@@ -157,8 +157,8 @@ class CCD(object):
             #targ_noise = np.median(np.sqrt(self.sl_targ_peak))*self.sl_targ_prof.unit/au.pixel
             #bckg_noise = np.median(np.sqrt(self.sl_bckg_prof))*self.sl_bckg_prof.unit/au.pixel
 
-            self.targ_noise_max = np.append(self.targ_noise_max, np.sqrt(np.max(self.sl_targ_prof)))
-            self.bckg_noise_med = np.append(self.bckg_noise_med, np.sqrt(np.median(self.sl_bckg_prof)))
+            self.targ_noise_max = np.append(self.targ_noise_max, np.sqrt(np.max(self.sl_targ_prof.value)))
+            self.bckg_noise_med = np.append(self.bckg_noise_med, np.sqrt(np.median(self.sl_bckg_prof.value)))
 
             """
 
