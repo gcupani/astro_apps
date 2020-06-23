@@ -753,7 +753,7 @@ class PSF(object):
                 self.fluxes = np.append(self.fluxes, flux.value)
                 self.fluxes_targ = np.append(self.fluxes_targ, flux_targ.value)
                 self.fluxes_bckg = np.append(self.fluxes_bckg, flux_bckg.value)
-                self.traces = np.vstack((self.traces, trace))
+                self.traces = np.vstack((self.traces, trace.value))
                 self.traces_targ = np.vstack((self.traces_targ, trace_targ))
                 self.traces_bckg = np.vstack((self.traces_bckg, trace_bckg))
         print("Slices designed on field.     ")
