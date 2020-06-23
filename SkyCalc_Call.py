@@ -102,22 +102,25 @@ os.system('~/.local/bin/skycalc_cli -i SkyCalc_input_NEW.txt -o SkyCalc_input_NE
 
 
 # Load output file
-T=Table.read('SkyCalc_input_NEW_Out.fits')
-
-
-# Extract data
-# example of 1 value --> T_1=T[19000][0]
-T_len=len(T)-1
-Sky_lam_v=np.zeros(T_len)
-Sky_flux_v=np.zeros(T_len)
-Sky_tras_v=np.zeros(T_len)
-for i in range(0,T_len):
-	# lambda extraction : conversion from um to A
-	Sky_lam_v[i]=T[i][0]*10000
-	# flux extraction : attention the flux is in [ph/s/m2/um/"]
-	Sky_flux_v[i]=T[i][1]
-	# Atm-Transmission extraction
-	Sky_tras_v[i]=T[i][4]
-
-print("Sky spectrum created and saved in SkyCalc_input_NEW_Out.fits.")
+try:
+    T=Table.read('SkyCalc_input_NEW_Out.fits')
+    
+    
+    # Extract data
+    # example of 1 value --> T_1=T[19000][0]
+    T_len=len(T)-1
+    Sky_lam_v=np.zeros(T_len)
+    Sky_flux_v=np.zeros(T_len)
+    Sky_tras_v=np.zeros(T_len)
+    for i in range(0,T_len):
+        # lambda extraction : conversion from um to A
+        Sky_lam_v[i]=T[i][0]*10000
+        # flux extraction : attention the flux is in [ph/s/m2/um/"]
+        Sky_flux_v[i]=T[i][1]
+        # Atm-Transmission extraction
+        Sky_tras_v[i]=T[i][4]
+    
+    print("Sky spectrum created and saved in SkyCalc_input_NEW_Out.fits.")
+except:
+    pass
 
