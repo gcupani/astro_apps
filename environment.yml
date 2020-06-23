@@ -3,4 +3,9 @@ channels:
   - conda-forge
 dependencies:
   - astropy
+  - matplotlib
+  - mpl_toolkits
   - numpy
+  - scipy
+  - sys
+  - warnings
