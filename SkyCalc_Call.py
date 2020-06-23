@@ -122,5 +122,6 @@ try:
     
     print("Sky spectrum created and saved in SkyCalc_input_NEW_Out.fits.")
 except:
-    pass
+    print("Unable to run SkyCalc.")
+
 
