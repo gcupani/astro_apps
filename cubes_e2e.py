@@ -209,8 +209,8 @@ class CCD(object):
 
         self.spec.targ_sum = self.targ_sum
         
-        self.targ_noise_max = self.targ_noise_max.value * au.ph/au.pixel
-        self.bckg_noise_med = self.bckg_noise_med.value * au.ph/au.pixel
+        self.targ_noise_max = self.targ_noise_max * au.ph/au.pixel
+        self.bckg_noise_med = self.bckg_noise_med * au.ph/au.pixel
 
 
 
@@ -518,7 +518,7 @@ class CCD(object):
         print("Slices extracted from arms.       ")
 
         #print(len(self.spec.flux_extr))
-        self.spec.flux_extr = self.spec.flux_extr.value * au.ph
+        self.spec.flux_extr = self.spec.flux_extr * au.ph
         #flux_final = self.spec.flux_extr
         self.spec.flux_final_tot = np.sum([np.sum(f)/len(f) * (M-m) 
                                            for f, M, m in zip(self.spec.flux_extr.value, self.wmaxs.value, self.wmins.value)])
