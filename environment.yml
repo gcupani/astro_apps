@@ -1,0 +1,6 @@
+name: cubes
+channels:
+  - conda-forge
+dependencies:
+  - astropy
+  - numpy
