@@ -120,6 +120,16 @@ class CCD(object):
         self.bckg_noise_med = []
         self.spec.fwhm = []
 
+        self.eff_wave = []
+        self.eff_adc = []
+        self.eff_slc = []
+        self.eff_dch = []
+        self.eff_spc = []
+        self.eff_grt = []
+        self.eff_ccd = []
+        self.eff_tel = []
+        self.eff_tot = []
+
         for i, (x, m, M, m_d, M_d) in enumerate(zip(
             self.xcens, self.wmins, self.wmaxs, self.wmins_d, self.wmaxs_d)):
             self.sl_targ_prof = []
@@ -138,7 +148,7 @@ class CCD(object):
             xshift = (slice_n*xspan+xlength)//2
             self.add_slices(int(x), xshift, xspan, self.psf_xlength,
                             wmin=m.value, wmax=M.value, wmin_d=m_d.value,
-                            wmax_d=M_d.value, arm=i)
+                            wmax_d=M_d.value)
             self.spec.m_d.append(m_d.value)
             self.spec.M_d.append(M_d.value)
             self.spec.arm_wave.append(self.arm_wave)
@@ -154,49 +164,10 @@ class CCD(object):
             self.sl_targ_prof = self.sl_targ_prof * au.ph
             self.sl_bckg_prof = self.sl_bckg_prof * au.ph
             
-            #targ_noise = np.median(np.sqrt(self.sl_targ_peak))*self.sl_targ_prof.unit/au.pixel
-            #bckg_noise = np.median(np.sqrt(self.sl_bckg_prof))*self.sl_bckg_prof.unit/au.pixel
-
             self.targ_noise_max = np.append(self.targ_noise_max, np.sqrt(np.max(self.sl_targ_prof.value)))
             self.bckg_noise_med = np.append(self.bckg_noise_med, np.sqrt(np.median(self.sl_bckg_prof.value)))
 
-            """
-
             
-            print("Arm %i:" % i)
-            print(" range: [%3.3f-%3.3f] %s" % (m.value, M.value, m.unit))    
-            print(" FWHM (resolution %3.2e): [%3.3f-%3.3f] %s" % (resol[i], fwhm[0].value, fwhm[1].value, fwhm[0].unit))
-            print(" median flux:")
-            print("  from target: %2.3e %s" % (np.median(self.sl_targ_peak), self.sl_targ_prof.unit/au.pixel))
-            print("  from background: %2.3e %s" % (np.median(self.sl_bckg_prof.value), self.sl_bckg_prof.unit/au.pixel))
-            print(" median noise:")
-            print("  from target: %2.3e %s" % (np.median(np.sqrt(self.sl_targ_peak)), self.sl_targ_prof.unit/au.pixel))
-            print("  from background: %2.3e %s" % (np.median(np.sqrt(self.sl_bckg_prof.value)), self.sl_bckg_prof.unit/au.pixel))
-            """
-            
-            #noise = np.sqrt(targ_noise.value**2 + bckg_noise.value**2 + self.dark**2 + self.ron**2)
-
-            
-            #targ_noise_rand = np.random.normal(0., 1., self.signal[:,:,i].shape)*self.targ_prof
-            #bckg_noise_rand = np.random.normal(0., 1., self.signal[:,:,i].shape)*self.bckg_prof
-            #dark_rand = np.random.normal(0., np.abs(self.dark), self.signal[:,:,i].shape)
-            #ron_rand = np.random.normal(0., np.abs(self.ron), self.signal[:,:,i].shape)
-            #noise_rand = np.sqrt(targ_noise_rand.value**2 + bckg_noise_rand.value**2 + self.dark**2 + self.ron**2)
-            #self.noise[:,:,i] = noise_rand
-    
-
-
-
-
-
-
-            """
-            line, = self.spec.ax.plot(
-                self.arm_wave, self.arm_targ \
-                * self.tot_eff(self.arm_wave, m_d.value, M_d.value), c='C3')
-            if i == 0:
-                line.set_label('On detector')
-            """
         print("Slices projected onto arms.       ")
 
         self.targ_peak = self.targ_prof[self.targ_prof>99e-2*np.max(self.targ_prof)]
@@ -297,9 +268,9 @@ class CCD(object):
         # Efficiency
         if wmin_d is not None and wmax_d is not None:
             #sl_norm = sl_norm * self.tot_eff(wave, wmin_d, wmax_d)
-            sl_targ = sl_targ * self.tot_eff(wave, wmin_d, wmax_d)
-            sl_bckg = sl_bckg * self.tot_eff(wave, wmin_d, wmax_d)
-
+            tot_eff = self.tot_eff(wave, wmin_d, wmax_d)
+            sl_targ = sl_targ * tot_eff
+            sl_bckg = sl_bckg * tot_eff
 
 
         #signal = np.round(np.multiply.outer(sl_norm, sl_trace))
@@ -333,12 +304,12 @@ class CCD(object):
 
 
     def add_slices(self, xcen, xshift, xspan, psf_xlength, wmin, wmax, wmin_d,
-                   wmax_d, arm):
+                   wmax_d):
 
         xcens = range(xcen-xshift, xcen+xshift, xspan)
 
         for s, (c, t, t_t, t_b) in enumerate(zip(xcens[1:], self.psf.traces, self.psf.traces_targ, self.psf.traces_bckg)):
-            print("Projecting slice %i onto arm %i..." % (s, arm), end='\r')
+            print("Projecting slice %i onto arm %i..." % (s, self.arm_counter), end='\r')
 
             _, _, sl_msignal = self.add_slice(t, t_t, t_b, c, wmin, wmax, wmin_d, wmax_d)
 
@@ -381,6 +352,34 @@ class CCD(object):
         self.ax_s.axhline(2.0, linestyle=':')
         self.ax_s.text(np.min(self.spec.arm_wave[0]), 2.0, "Nyquist limit", ha='left', va='bottom')
         self.ax_s.legend()
+        
+        fig_e, self.ax_e = plt.subplots(figsize=(10,7))
+        self.ax_e.set_title("Efficiency")
+        for i in range(0,arm_n*slice_n,slice_n):  # Only one slice per arm is plotted, as they are the same efficiency-wise
+            self.ax_e.plot(self.eff_wave[i], self.eff_adc[i], label='ADC' if i==0 else '', color='C0', linestyle=':')
+            self.ax_e.plot(self.eff_wave[i], self.eff_slc[i], label='Slicer' if i==0 else '', color='C1', linestyle=':')
+            self.ax_e.plot(self.eff_wave[i], self.eff_dch[i], label='Dichroich' if i==0 else '', color='C2', linestyle=':')
+            self.ax_e.plot(self.eff_wave[i], self.eff_spc[i], label='Spectrograph' if i==0 else '', color='C3', linestyle=':')
+            self.ax_e.plot(self.eff_wave[i], self.eff_grt[i], label='Grating' if i==0 else '', color='C4', linestyle=':')
+            self.ax_e.plot(self.eff_wave[i], self.eff_ccd[i], label='CCD' if i==0 else '', color='C5', linestyle=':')
+            self.ax_e.plot(self.eff_wave[i], self.eff_tel[i], label='Telescope' if i==0 else '', color='C6', linestyle=':')
+            self.ax_e.plot(self.eff_wave[i], self.eff_tot[i], label='Total' if i==0 else '', color='C0')
+            self.ax_e.plot(self.eff_wave[i], self.eff_tot[i]*cspline(self.spec.wave, self.spec.atmo_ex)(self.eff_wave[i]),
+                           label='Total including extinction' if i==0 else '', color='C0', linestyle='--')
+
+            self.ax_e.scatter(eff_wave, eff_adc, color='C0')
+            self.ax_e.scatter(eff_wave, eff_slc, color='C1')
+            self.ax_e.scatter(eff_wave, eff_dch, color='C2')
+            self.ax_e.scatter(eff_wave, eff_spc, color='C3')
+            self.ax_e.scatter(eff_wave, eff_grt, color='C4')
+            self.ax_e.scatter(eff_wave, eff_ccd, color='C5')
+            self.ax_e.scatter(eff_wave, eff_tel, color='C6')
+            self.ax_e.set_xlabel('Wavelength (%s)' % au.nm)
+            self.ax_e.set_ylabel('Fractional throughput')
+        self.ax_e.legend()
+
+        
+        
 
         fig_b, self.ax_b = plt.subplots(figsize=(7,7))
         self.ax_b.set_title("Noise breakdown")
@@ -576,15 +575,38 @@ class CCD(object):
     def tot_eff(self, wave, wmin_d, wmax_d, fact=2):
         dch_shape = expit(fact*(wave-wmin_d))*expit(fact*(wmax_d-wave))
         i = self.arm_counter
-        adc = eff_adc[i]
-        slc = eff_slc[i]
-        dch = dch_shape * eff_dch[i]
-        spc = eff_spc[i]
-        grt = eff_grt[i]
-        ccd = eff_ccd[i]
-        tel = eff_tel[i]
+        
+        adc = cspline(eff_wave, eff_adc)(wave)
+        slc = cspline(eff_wave, eff_slc)(wave)
+        dch = cspline(eff_wave, eff_dch)(wave) * dch_shape
+        spc = cspline(eff_wave, eff_spc)(wave)
+        grt = cspline(eff_wave, eff_grt)(wave)
+        ccd = cspline(eff_wave, eff_ccd)(wave)
+        tel = cspline(eff_wave, eff_tel)(wave)
+        tot = adc * slc * dch * spc * grt * ccd * tel
+
+        #adc = eff_adc[i]
+        #slc = eff_slc[i]
+        #dch = dch_shape * dch_spl
+        #spc = eff_spc[i]
+        #grt = eff_grt[i]
+        #ccd = eff_ccd[i]
+        #tel = eff_tel[i]
         #return dch_shape
-        return adc * slc * dch * spc * grt * ccd * tel
+        self.eff_wave.append(wave)
+        #print(self.eff_wave)
+        self.eff_adc.append(adc)
+        self.eff_slc.append(slc)
+        self.eff_dch.append(dch)
+        self.eff_spc.append(spc)
+        self.eff_grt.append(grt)
+        self.eff_ccd.append(ccd)
+        self.eff_tel.append(tel)
+        #print(self.eff_dch)
+        self.eff_tot.append(tot)
+
+
+        return tot
 
     
     def wave_grid(self, wmin, wmax):

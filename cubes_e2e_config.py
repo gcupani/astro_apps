@@ -36,13 +36,14 @@ wave_u = 356 * au.nm  # Effective wavelength, u band
 flux_U = 7561 * au.photon / au.cm**2 / au.s / au.nm  # Flux density @ 360.0 nm, mag_U = 0 (Vega)
 flux_u = 15393 * au.photon / au.cm**2 / au.s / au.nm  # Flux density @ 356.0 nm, mag_u = 0 (AB)
 
-eff_adc = [0.96, 0.96, 0.96]  # ADC efficiency
-eff_slc = [0.98, 0.98, 0.98]  # Slicer efficiency
-eff_dch = [0.96, 0.96, 0.96]  # Dichroics efficiency
-eff_spc = [0.93, 0.94, 0.93]  # Spectrograph efficiency
-eff_grt = [0.90, 0.90, 0.90]  # Grating efficiency
-eff_ccd = [0.85, 0.85, 0.85]  # CCD QE
-eff_tel = [0.72, 0.72, 0.72]  # Telescope efficiency
+eff_wave = [300, 320, 340, 360, 380, 400]  # Efficiency sampling wavelengths
+eff_adc = [0.96, 0.96, 0.96, 0.96, 0.96, 0.96]  # ADC efficiency
+eff_slc = [0.96, 0.96, 0.96, 0.96, 0.96, 0.96]  # Slicer efficiency
+eff_dch = [0.98, 0.98, 0.98, 0.98, 0.98, 0.98]  # Dichroics efficiency
+eff_spc = [0.96, 0.96, 0.96, 0.96, 0.96, 0.96]  # Spectrograph efficiency
+eff_grt = [0.93, 0.93, 0.94, 0.94, 0.93, 0.93]  # Grating efficiency
+eff_ccd = [0.90, 0.90, 0.90, 0.90, 0.90, 0.90]  # CCD QE
+eff_tel = [0.85, 0.85, 0.85, 0.85, 0.85, 0.85]  # Telescope efficiency
 resol = [2.0e4, 2.1e4, 2.2e4]  # Instrument resolution
 
 ccd_xsize = 4096*au.pixel  # X size of the CCD
