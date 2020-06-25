@@ -86,7 +86,7 @@ class CCD(object):
         dw = np.full(int(self.ysize.value), 0.5*(wmin.value+wmax.value))
         for j in range(10):
             wmin2 = wmax.value-np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dw))
-            dw = np.linspace(wmin2, wmax.value, self.ysize.value)
+            dw = np.linspace(wmin2, wmax.value, int(self.ysize.value))
         wmin = wmin2*wmin.unit 
         #print(wmin)
             
@@ -101,7 +101,7 @@ class CCD(object):
             dw = np.full(int(self.ysize.value), 0.5*(wmin.value+wmax.value))
             for j in range(10):
                 wmax2 = wmin.value+np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dw))
-                dw = np.linspace(wmin.value, wmax2, self.ysize.value)
+                dw = np.linspace(wmin.value, wmax2, int(self.ysize.value))
             wmax = wmax2*wmax.unit
             #print(wmax)
            
