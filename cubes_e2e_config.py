@@ -36,7 +36,7 @@ wave_u = 356 * au.nm  # Effective wavelength, u band
 flux_U = 7561 * au.photon / au.cm**2 / au.s / au.nm  # Flux density @ 360.0 nm, mag_U = 0 (Vega)
 flux_u = 15393 * au.photon / au.cm**2 / au.s / au.nm  # Flux density @ 356.0 nm, mag_u = 0 (AB)
 
-eff_wave = [300, 320, 340, 360, 380, 400]  # Efficiency sampling wavelengths
+eff_wave = [300, 320, 340, 360, 380, 400]*au.nm  # Efficiency sampling wavelengths
 eff_adc = [0.96, 0.96, 0.96, 0.96, 0.96, 0.96]  # ADC efficiency
 eff_slc = [0.96, 0.96, 0.96, 0.96, 0.96, 0.96]  # Slicer efficiency
 eff_dch = [0.98, 0.98, 0.98, 0.98, 0.98, 0.98]  # Dichroics efficiency
@@ -56,6 +56,9 @@ spat_scale = 0.25*au.arcsec/(30*au.micron)  # Spatial scale
 arm_n = 3  # Number of arms
 wave_d = [336, 367]*au.nm
 wave_sampl = [8.1e-3, 8.8e-3, 8.9e-3]*au.nm/au.pixel
+disp_wave = [300, 325, 350, 375, 400]*au.nm  # Wavelengths used to model dispersion
+disp_sampl = [7.4e-3, 8.0e-3, 8.6e-3, 9.2e-3, 9.8e-3]*au.nm/au.pixel*ccd_ybin  # Dispersion sampling on CCD
+disp_resol = [2.0e4, 2.0e4, 2.0e4, 2.0e4, 2.0e4]  # Resolution
 wave_d_shift = 2*au.nm
 slice_n = 6  # Number of slices
 slice_length = 10*au.arcsec  # Length of the slice
@@ -95,4 +98,4 @@ spec_pars = ['spec_templ', 'spec_file', 'qso_zem', 'qso_lya_abs', 'airmass', 'pw
 psf_pars = ['psf_func', 'psf_sampl', 'psf_cen', 'slice_n', 'slice_length', 'slice_width', 'seeing']
 ccd_pars = ['ccd_gain', 'ccd_ron', 'ccd_dark', 'ccd_xsize', 'ccd_ysize', 'pix_xsize', 'pix_ysize', 'ccd_xbin', 'ccd_ybin',
             'arm_n', 'wave_d', 'wave_sampl', 'eff_adc', 'eff_slc', 'eff_dch', 'eff_spc', 'eff_grt', 'eff_ccd', 'resol', 
-            'spat_scale', 'slice_gap']
+            'spat_scale', 'slice_gap', 'extr_func']

@@ -82,6 +82,14 @@ class CCD(object):
 
         wmax = wave_d[0]+wave_d_shift
         wmin = wmax-self.ysize*wave_sampl[0]
+        #print(wmin)
+        dw = np.full(int(self.ysize.value), 0.5*(wmin.value+wmax.value))
+        for j in range(10):
+            wmin2 = wmax.value-np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dw))
+            dw = np.linspace(wmin2, wmax.value, self.ysize.value)
+        wmin = wmin2*wmin.unit 
+        #print(wmin)
+            
         self.wmins = np.array([wmin.to(au.nm).value])
         self.wmaxs = np.array([wmax.to(au.nm).value])
         self.wmins_d = np.array([wmin.to(au.nm).value])
@@ -89,6 +97,14 @@ class CCD(object):
         for i in range(len(wave_d)): 
             wmin = wave_d[i]-wave_d_shift
             wmax = wmin+self.ysize*wave_sampl[i+1]
+            #print(wmax)
+            dw = np.full(int(self.ysize.value), 0.5*(wmin.value+wmax.value))
+            for j in range(10):
+                wmax2 = wmin.value+np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dw))
+                dw = np.linspace(wmin.value, wmax2, self.ysize.value)
+            wmax = wmax2*wmax.unit
+            #print(wmax)
+           
             self.wmins = np.append(self.wmins, wmin.to(au.nm).value)
             self.wmaxs = np.append(self.wmaxs, wmax.to(au.nm).value)
             self.wmins_d = np.append(self.wmins_d, wave_d[i].to(au.nm).value)
@@ -119,6 +135,8 @@ class CCD(object):
         self.targ_noise_max = []
         self.bckg_noise_med = []
         self.spec.fwhm = []
+        self.spec.resol = []
+
 
         self.eff_wave = []
         self.eff_adc = []
@@ -154,9 +172,14 @@ class CCD(object):
             self.spec.arm_wave.append(self.arm_wave)
             self.spec.arm_targ.append(self.arm_targ)
             #sampl = (M-m)/self.ysize 
-            fwhm = [w/resol[i]/wave_sampl[i] for w in [m, M]]
+            #fwhm = [w/resol[i]/wave_sampl[i] for w in [m, M]]
             #self.spec.fwhm = np.vstack((self.fwhm, self.arm_wave/resol[i]/wave_sampl[i]))
-            self.spec.fwhm.append(self.arm_wave/resol[i]/wave_sampl[i])
+            disp = cspline(disp_wave, disp_resol*disp_sampl*ccd_ybin)(self.arm_wave)
+            #self.spec.fwhm.append(self.arm_wave/resol[i]/wave_sampl[i])
+            self.spec.fwhm.append(self.arm_wave/disp)
+            self.spec.resol.append(cspline(disp_wave, disp_resol)(self.arm_wave))
+
+
 
             self.targ_prof = np.append(self.targ_prof, self.sl_targ_prof)
             self.bckg_prof = np.append(self.bckg_prof, self.sl_bckg_prof)
@@ -343,15 +366,22 @@ class CCD(object):
         self.ax_p.legend([p0[0][0],p1[0][0],p2[0][0]], [sl_l[0]]+sl_l[1::2])
 
 
-        fig_s, self.ax_s = plt.subplots(figsize=(10,7))
-        self.ax_s.set_title("Arm range and sampling")
+        fig_s, self.ax_s = plt.subplots(3, 1, figsize=(10,10), sharex=True)
+        self.ax_s[0].set_title("Resolution and sampling")
         for i in range(arm_n):
-            self.ax_s.plot(self.spec.arm_wave[i], self.spec.fwhm[i], label='Arm %i (resol: %2.3e)' % (i, resol[i]))
-            self.ax_s.set_xlabel('Wavelength (%s)' % au.nm)
-            self.ax_s.set_ylabel('FWHM (1/%s)' % au.pixel)
-        self.ax_s.axhline(2.0, linestyle=':')
-        self.ax_s.text(np.min(self.spec.arm_wave[0]), 2.0, "Nyquist limit", ha='left', va='bottom')
-        self.ax_s.legend()
+            self.ax_s[0].plot(self.spec.arm_wave[i], self.spec.resol[i], label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
+            self.ax_s[0].get_xaxis().set_visible(False)
+            self.ax_s[0].set_ylabel('Resolution')
+            self.ax_s[1].plot(self.spec.arm_wave[i], cspline(disp_wave, disp_sampl*ccd_ybin)(self.spec.arm_wave[i]), label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
+            self.ax_s[1].get_xaxis().set_visible(False)
+            self.ax_s[1].set_ylabel('Sampling (%s/%s)' % (au.nm, au.pixel))
+            self.ax_s[2].plot(self.spec.arm_wave[i], self.spec.fwhm[i], label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
+            self.ax_s[2].set_xlabel('Wavelength (%s)' % au.nm)
+            self.ax_s[2].set_ylabel('FWHM (1/%s)' % au.pixel)
+        self.ax_s[2].axhline(2.0, linestyle=':')
+        self.ax_s[2].text(np.min(self.spec.arm_wave[0]), 2.0, "Nyquist limit", ha='left', va='bottom')
+        self.ax_s[2].legend()
+        fig_s.subplots_adjust(hspace=0)
         
         fig_e, self.ax_e = plt.subplots(figsize=(10,7))
         self.ax_e.set_title("Efficiency")
@@ -1285,7 +1315,7 @@ class Sim():
 
     def ccd_create(self):            
         self.check(True, 'phot', 'spec', 'psf')
-        self._ccd = CCD(self._psf, self._spec, xsize=ccd_xsize, ysize=ccd_ysize, xbin=ccd_xbin, ybin=ccd_ybin)
+        self._ccd = CCD(self._psf, self._spec, xsize=ccd_xsize, ysize=ccd_ysize, xbin=ccd_xbin, ybin=ccd_ybin, func=extr_func)
         self._ccd.add_arms(n=arm_n, wave_d=wave_d, wave_sampl=wave_sampl, wave_d_shift=wave_d_shift)
 
         
