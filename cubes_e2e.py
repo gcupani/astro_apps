@@ -1075,7 +1075,7 @@ class Spec(object):
         print("Input spectra created.")
 
         if skycalc:
-            self.create(flux_bckg, 'bckg')
+            self.create(flux_bckg, 'bckg', norm_flux=False)
             print("Sky spectrum imported from SkyCalc_input_NEW_Out.fits.")
 
             
@@ -1091,8 +1091,11 @@ class Spec(object):
         #print(" from background: %2.3e %s" % (self.bckg_tot.value, self.bckg_tot.unit))
 
         
-    def create(self, flux, obj='targ'):
-        raw = flux*getattr(self.phot, obj)
+    def create(self, flux, obj='targ', norm_flux=True):
+        if norm_flux:
+            raw = flux*getattr(self.phot, obj)
+        else:
+            raw = flux
         ext = raw*self.atmo_ex
         tot = np.sum(ext)/len(ext) * (self.wmax-self.wmin)
         #norm = ext/np.sum(ext) / au.nm
@@ -1291,11 +1294,11 @@ class Spec(object):
         return flux * self.atmo_ex
 
     def skycalc(self):
-        name = 'SkyCalc_input_NEW_Out.fits'   
+        name = 'SkyCalc_input_NEW_Out.fitso'   
         data = Table.read(name)
         #print(data.colnames)
         wavef = data['lam'] * au.nm
-        fluxf = data['flux'] * (4)**2 * np.pi / 1e3
+        fluxf = data['flux'] * (400)**2 * np.pi / 1e3
         atmo_trans = data['trans']
         self.phot.atmo_wave = wavef
         self.phot.atmo_ex = (1-atmo_trans)
@@ -1390,7 +1393,7 @@ class Sim():
 
     def phot_create(self):
         self.start()
-        self._phot = Photons(targ_mag=targ_mag, texp=texp)
+        self._phot = Photons(targ_mag=targ_mag, bckg_mag=bckg_mag, texp=texp)
         
         
     def psf(self):
