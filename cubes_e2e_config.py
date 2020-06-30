@@ -74,7 +74,7 @@ ccd_gain = 1.1*au.photon/au.adu
 #ccd_dark = 0.5*au.adu/au.h
 ccd_dark = 3/1.1*au.adu/au.h
 
-seeing = 0.7*au.arcsec  # Seeing
+seeing = 0.87*au.arcsec  # Seeing
 psf_func = 'gaussian'  # Function to represent the PSF ('tophat', 'gaussian', 'moffat')
 psf_sampl = 1000*au.pixel  # Size of the PSF image
 psf_cen = (0,0)  # Center of the PSF
@@ -84,7 +84,7 @@ mag_syst = 'AB'  # Magnitude system
 mag_band = 'r'  # Magnitude band
 targ_mag = 17  # Magnitude of the target @ 350 nm
 bckg_mag = 22.5  # Magnitude of the background @ 350 nm
-airmass = 1.0  # Airmass
+airmass = 1.16  # Airmass
 pwv = 10.0  # Precipitable water vapor
 moond = 0  # Days from new moon
 
