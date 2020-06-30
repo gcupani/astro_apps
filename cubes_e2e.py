@@ -56,7 +56,7 @@ class CCD(object):
         self.dsignal = np.zeros((int(self.ysize.value), int(self.xsize.value), n))
         self.noise = np.zeros((int(self.ysize.value), int(self.xsize.value), n))
 
-        print(ccd_dark, ccd_gain, self.npix, self.spec.phot.texp)
+        #print(ccd_dark, ccd_gain, self.npix, self.spec.phot.texp)
         self.dark = np.sqrt((ccd_dark*ccd_gain*self.npix*self.spec.phot.texp)\
                             .to(au.photon).value)
         self.ron = (ccd_ron*ccd_gain).value
