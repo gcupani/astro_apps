@@ -174,10 +174,22 @@ class CCD(object):
             #sampl = (M-m)/self.ysize 
             #fwhm = [w/resol[i]/wave_sampl[i] for w in [m, M]]
             #self.spec.fwhm = np.vstack((self.fwhm, self.arm_wave/resol[i]/wave_sampl[i]))
-            disp = cspline(disp_wave, disp_resol*disp_sampl*ccd_ybin)(self.arm_wave)
+            
+            spl_sel = np.where(np.logical_and(disp_wave.value>np.min(self.arm_wave),
+                                              disp_wave.value<np.max(self.arm_wave)))[0]
+            if len(spl_sel)>1:
+                spl_wave = disp_wave[spl_sel] 
+                spl_sampl = disp_sampl[spl_sel] 
+                spl_resol = np.array(disp_resol)[spl_sel] 
+            else:
+                spl_wave = disp_wave
+                spl_sampl = disp_sampl
+                spl_resol = np.array(disp_resol)
+
+            disp = cspline(spl_wave, spl_resol*spl_sampl*ccd_ybin)(self.arm_wave)
             #self.spec.fwhm.append(self.arm_wave/resol[i]/wave_sampl[i])
             self.spec.fwhm.append(self.arm_wave/disp)
-            self.spec.resol.append(cspline(disp_wave, disp_resol)(self.arm_wave))
+            self.spec.resol.append(cspline(spl_wave, spl_resol)(self.arm_wave))
 
 
 
@@ -366,13 +378,63 @@ class CCD(object):
         self.ax_p.legend([p0[0][0],p1[0][0],p2[0][0]], [sl_l[0]]+sl_l[1::2])
 
 
+        fig_r, self.ax_r = plt.subplots(figsize=(5,5))
+        self.ax_r.set_title("Pixel size")
+        xsize = pix_xsize*ccd_xbin
+        ysize = pix_ysize*ccd_ybin
+        xreal = pix_xsize*ccd_xbin*spat_scale
+        yreal = np.mean(disp_sampl.value)*ccd_ybin*disp_sampl.unit*au.pixel
+        size = max(xsize.value, ysize.value)
+        
+        self.ax_r.add_patch(patches.Rectangle((0,0), xsize.value, ysize.value, edgecolor='b', facecolor='b', alpha=0.3))
+        self.ax_r.set_xlim(-0.2*size, size*1.2)
+        self.ax_r.set_ylim(-0.2*size, size*1.2)
+        for x in np.arange(0.0, xsize.value, pix_xsize.value):
+            self.ax_r.axvline(x, 1/7, 1/7+5/7*ysize.value/size, linestyle=':')
+        for y in np.arange(0.0, ysize.value, pix_ysize.value):
+            self.ax_r.axhline(y, 1/7, 1/7+5/7*xsize.value/size, linestyle=':')
+        self.ax_r.text(0.5*xsize.value, -0.1*ysize.value, 
+                       '%3.1f %s = %3.1f %s' % (xsize.value, xsize.unit, xreal.value, xreal.unit), ha='center', va='center')
+        self.ax_r.text(-0.1*xsize.value, 0.5*ysize.value,
+                       '%3.1f %s ~ %3.2e %s' % (ysize.value, ysize.unit, yreal.value, yreal.unit), ha='center', va='center',
+                       rotation=90)
+
+        self.ax_r.set_axis_off()
+
+        
         fig_s, self.ax_s = plt.subplots(3, 1, figsize=(10,10), sharex=True)
         self.ax_s[0].set_title("Resolution and sampling")
         for i in range(arm_n):
             self.ax_s[0].plot(self.spec.arm_wave[i], self.spec.resol[i], label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
             self.ax_s[0].get_xaxis().set_visible(False)
             self.ax_s[0].set_ylabel('Resolution')
-            self.ax_s[1].plot(self.spec.arm_wave[i], cspline(disp_wave, disp_sampl*ccd_ybin)(self.spec.arm_wave[i]), label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
+            #print(disp_wave, np.min(self.spec.arm_wave[i]), np.max(self.spec.arm_wave[i]))
+           
+            """
+            arm_sel = np.where(np.logical_and(disp_wave.value>np.min(self.spec.arm_wave[i]), 
+                                              disp_wave.value<np.max(self.spec.arm_wave[i])))
+            print(disp_wave.value, np.min(self.spec.arm_wave[i]), np.max(self.spec.arm_wave[i]), disp_wave[arm_sel])
+            try:
+                self.ax_s[1].plot(self.spec.arm_wave[i], 
+                                  cspline(disp_wave[arm_sel], disp_sampl[arm_sel]*ccd_ybin)(self.spec.arm_wave[i]), 
+                                  label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
+            except:
+                self.ax_s[1].plot(self.spec.arm_wave[i], 
+                                  cspline(disp_wave, disp_sampl*ccd_ybin)(self.spec.arm_wave[i]), 
+                                  label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
+            """
+            spl_sel = np.where(np.logical_and(disp_wave.value>np.min(self.spec.arm_wave[i]),
+                                              disp_wave.value<np.max(self.spec.arm_wave[i])))[0]
+            if len(spl_sel)>1:
+                spl_wave = disp_wave[spl_sel] 
+                spl_sampl = disp_sampl[spl_sel] 
+            else:
+                spl_wave = disp_wave
+                spl_sampl = disp_sampl
+            self.ax_s[1].plot(self.spec.arm_wave[i], cspline(spl_wave, spl_sampl*ccd_ybin)(self.spec.arm_wave[i]), 
+                              label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
+
+
             self.ax_s[1].get_xaxis().set_visible(False)
             self.ax_s[1].set_ylabel('Sampling (%s/%s)' % (au.nm, au.pixel))
             self.ax_s[2].plot(self.spec.arm_wave[i], self.spec.fwhm[i], label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
@@ -1137,6 +1199,7 @@ class Spec(object):
         line1.set_label('On detector')            
         line2.set_label('Extracted')
         line3.set_label('Extracted (error)')
+        self.ax.set_yscale('log')
 
         self.ax.legend(loc=2, fontsize=8)
         #self.ax.set_xlabel('Wavelength (%s)' % self.wave.unit)

@@ -47,18 +47,21 @@ eff_tel = [0.85, 0.85, 0.85, 0.85, 0.85, 0.85]  # Telescope efficiency
 resol = [2.0e4, 2.1e4, 2.2e4]  # Instrument resolution
 
 ccd_xsize = 4096*au.pixel  # X size of the CCD
-ccd_ysize = 4096*au.pixel  # Y size of the CCD
+ccd_ysize = 6144*au.pixel  # Y size of the CCD
 ccd_xbin = 1  # X binning of the CCD
 ccd_ybin = 1  # Y binning of the CCD
 pix_xsize = 15*au.micron  # X size of the pixels
 pix_ysize = 15*au.micron  # Y size of the pixels
 spat_scale = 0.25*au.arcsec/(30*au.micron)  # Spatial scale
-arm_n = 3  # Number of arms
-wave_d = [336, 367]*au.nm
+arm_n = 2  # Number of arms
+if arm_n == 2:
+   wave_d = [347.5]*au.nm  # Wavelength of dichroich
+if arm_n == 3:
+   wave_d = [335, 362.5]*au.nm  # Wavelength of dichroichswave_d = [336, 367]*au.nm
 wave_sampl = [8.1e-3, 8.8e-3, 8.9e-3]*au.nm/au.pixel
-disp_wave = [300, 325, 350, 375, 400]*au.nm  # Wavelengths used to model dispersion
-disp_sampl = [7.4e-3, 8.0e-3, 8.6e-3, 9.2e-3, 9.8e-3]*au.nm/au.pixel*ccd_ybin  # Dispersion sampling on CCD
-disp_resol = [2.0e4, 2.0e4, 2.0e4, 2.0e4, 2.0e4]  # Resolution
+disp_wave = [300, 320, 340, 360, 380, 400]*au.nm  # Wavelengths used to model dispersion
+disp_sampl = [8.2e-3, 7.6e-3, 7.0e-3, 8.3e-3, 7.7e-3, 7.1e-3]*au.nm/au.pixel  # Dispersion sampling on CCD
+disp_resol = [1.86e4, 1.91e4, 1.96e4, 2.01e4, 2.06e4, 2.11e4]  # Resolution
 wave_d_shift = 2*au.nm
 slice_n = 6  # Number of slices
 slice_length = 10*au.arcsec  # Length of the slice
@@ -97,5 +100,5 @@ phot_pars = ['mag_syst', 'mag_band', 'targ_mag', 'texp']
 spec_pars = ['spec_templ', 'spec_file', 'qso_zem', 'qso_lya_abs', 'airmass', 'pwv', 'moond']
 psf_pars = ['psf_func', 'psf_sampl', 'psf_cen', 'slice_n', 'slice_length', 'slice_width', 'seeing']
 ccd_pars = ['ccd_gain', 'ccd_ron', 'ccd_dark', 'ccd_xsize', 'ccd_ysize', 'pix_xsize', 'pix_ysize', 'ccd_xbin', 'ccd_ybin',
-            'arm_n', 'wave_d', 'wave_sampl', 'eff_adc', 'eff_slc', 'eff_dch', 'eff_spc', 'eff_grt', 'eff_ccd', 'resol', 
-            'spat_scale', 'slice_gap', 'extr_func']
+            'arm_n', 'wave_d', 'eff_adc', 'eff_slc', 'eff_dch', 'eff_spc', 'eff_grt', 'eff_ccd', 'disp_wave', 'disp_sampl', 
+            'disp_resol', 'spat_scale', 'slice_gap', 'extr_func']
