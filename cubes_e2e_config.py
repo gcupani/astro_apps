@@ -83,7 +83,7 @@ texp = 3600*au.s  # Exposure time
 mag_syst = 'AB'  # Magnitude system
 mag_band = 'r'  # Magnitude band
 targ_mag = 17  # Magnitude of the target @ 350 nm
-bckg_mag = 22.5  # Magnitude of the background @ 350 nm
+bckg_mag = 21  # Magnitude of the background @ 350 nm
 airmass = 1.16  # Airmass
 pwv = 10.0  # Precipitable water vapor
 moond = 0  # Days from new moon
@@ -96,7 +96,7 @@ qso_lya_abs = True
 extr_func = 'sum'  # Function for extracting the spectrum ('sum', 'opt' [very slow])
 snr_sampl = 1*au.nm  # Data points per SNR point
 
-phot_pars = ['mag_syst', 'mag_band', 'targ_mag', 'texp']
+phot_pars = ['bckg_mag', 'mag_syst', 'mag_band', 'targ_mag', 'texp']
 spec_pars = ['spec_templ', 'spec_file', 'qso_zem', 'qso_lya_abs', 'airmass', 'pwv', 'moond']
 psf_pars = ['psf_func', 'psf_sampl', 'psf_cen', 'slice_n', 'slice_length', 'slice_width', 'seeing']
 ccd_pars = ['ccd_gain', 'ccd_ron', 'ccd_dark', 'ccd_xsize', 'ccd_ysize', 'pix_xsize', 'pix_ysize', 'ccd_xbin', 'ccd_ybin',

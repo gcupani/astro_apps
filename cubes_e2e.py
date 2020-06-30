@@ -1047,7 +1047,7 @@ class PSF(object):
 class Spec(object):
 
 #    def __init__(self, phot, file=None, wmin=317.142*au.nm, wmax=378.268*au.nm,
-    def __init__(self, phot, file=None, wmin=300*au.nm, wmax=410*au.nm,
+    def __init__(self, phot, file=None, wmin=300*au.nm, wmax=550*au.nm,
                  dw=1e-3*au.nm, templ=spec_templ):
         self.phot = phot
         self.file = file
@@ -1347,9 +1347,9 @@ class Sim():
         """
         if start: 
             for o in args:
-                #print(o)
                 if hasattr(self, '_'+o) and o+'_pars' in globals():
                     for k in globals()[o+'_pars']:
+                        #print(k)
                         try:
                             r = self.__dict__[k]!=globals()[k]
                             try:
@@ -1390,7 +1390,7 @@ class Sim():
 
     def phot_create(self):
         self.start()
-        self._phot = Photons(targ_mag=targ_mag, texp=texp)
+        self._phot = Photons(targ_mag=targ_mag, bckg_mag=bckg_mag, texp=texp)
         
         
     def psf(self):
