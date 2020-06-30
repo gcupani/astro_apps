@@ -46,7 +46,7 @@ eff_ccd = [0.90, 0.90, 0.90, 0.90, 0.90, 0.90]  # CCD QE
 eff_tel = [0.85, 0.85, 0.85, 0.85, 0.85, 0.85]  # Telescope efficiency
 resol = [2.0e4, 2.1e4, 2.2e4]  # Instrument resolution
 
-ccd_xsize = 4096*au.pixel  # X size of the CCD
+ccd_xsize = 6144*au.pixel  # X size of the CCD
 ccd_ysize = 6144*au.pixel  # Y size of the CCD
 ccd_xbin = 1  # X binning of the CCD
 ccd_ybin = 1  # Y binning of the CCD
@@ -83,7 +83,7 @@ texp = 3600*au.s  # Exposure time
 mag_syst = 'AB'  # Magnitude system
 mag_band = 'r'  # Magnitude band
 targ_mag = 17  # Magnitude of the target @ 350 nm
-bckg_mag = 21  # Magnitude of the background @ 350 nm
+bckg_mag = 22.5  # Magnitude of the background @ 350 nm
 airmass = 1.16  # Airmass
 pwv = 10.0  # Precipitable water vapor
 moond = 0  # Days from new moon
