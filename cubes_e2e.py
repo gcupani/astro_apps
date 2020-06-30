@@ -56,7 +56,7 @@ class CCD(object):
         self.dsignal = np.zeros((int(self.ysize.value), int(self.xsize.value), n))
         self.noise = np.zeros((int(self.ysize.value), int(self.xsize.value), n))
 
-
+        print(ccd_dark, ccd_gain, self.npix, self.spec.phot.texp)
         self.dark = np.sqrt((ccd_dark*ccd_gain*self.npix*self.spec.phot.texp)\
                             .to(au.photon).value)
         self.ron = (ccd_ron*ccd_gain).value
@@ -1095,7 +1095,7 @@ class Spec(object):
         if norm_flux:
             raw = flux*getattr(self.phot, obj)
         else:
-            raw = flux
+            raw = flux* au.ph/au.nm/au.arcsec**2
         ext = raw*self.atmo_ex
         tot = np.sum(ext)/len(ext) * (self.wmax-self.wmin)
         #norm = ext/np.sum(ext) / au.nm
@@ -1286,19 +1286,19 @@ class Spec(object):
             sel = np.where(self.wave.value<313)
             spl[sel] = 1.0
         except:
-            print('hey')
-
+            pass
+            
         flux = spl#/np.mean(spl) #* au.photon/au.nm
         if qso_lya_abs:
             flux = self.lya_abs(flux)
         return flux * self.atmo_ex
 
     def skycalc(self):
-        name = 'SkyCalc_input_NEW_Out.fitso'   
+        name = 'SkyCalc_input_NEW_Out.fits'   
         data = Table.read(name)
         #print(data.colnames)
         wavef = data['lam'] * au.nm
-        fluxf = data['flux'] * (400)**2 * np.pi / 1e3
+        fluxf = data['flux'] * self.phot.area.to(au.m**2).value * self.phot.texp * 1e-3
         atmo_trans = data['trans']
         self.phot.atmo_wave = wavef
         self.phot.atmo_ex = (1-atmo_trans)

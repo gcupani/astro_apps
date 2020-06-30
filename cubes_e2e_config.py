@@ -70,9 +70,9 @@ slice_gap = 40*au.pixel  # Length of the slice
 ccd_bias = 100*au.adu
 #ccd_ron = 2*au.adu
 ccd_gain = 1.1*au.photon/au.adu
-ccd_ron = 2*au.photon/ccd_gain
+ccd_ron = 2*au.photon / ccd_gain
 #ccd_dark = 0.5*au.adu/au.h
-ccd_dark = 3*au.photon/ccd_gain
+ccd_dark = 3*au.photon/au.h / ccd_gain
 
 seeing = 0.87*au.arcsec  # Seeing
 psf_func = 'gaussian'  # Function to represent the PSF ('tophat', 'gaussian', 'moffat')
