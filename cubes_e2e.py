@@ -1093,9 +1093,9 @@ class Spec(object):
         
     def create(self, flux, obj='targ', norm_flux=True):
         if norm_flux:
-            raw = flux*getattr(self.phot, obj)
+            raw = flux * getattr(self.phot, obj)
         else:
-            raw = flux* au.ph/au.nm/au.arcsec**2
+            raw = flux * au.ph/au.nm/au.arcsec**2
         ext = raw*self.atmo_ex
         tot = np.sum(ext)/len(ext) * (self.wmax-self.wmin)
         #norm = ext/np.sum(ext) / au.nm
@@ -1119,6 +1119,7 @@ class Spec(object):
             fluxf = data['col2']
         if qso_zem != None:
             wavef = wavef*(1+qso_zem)
+        self.wavef = wavef
         spl = cspline(wavef, fluxf)(self.wave.value)
         spl = spl/cspline(wavef, fluxf)(self.phot.wave_ref)
         flux = spl #* au.photon/au.nm
@@ -1226,7 +1227,7 @@ class Spec(object):
         #"""
         
     def flat(self):
-        return np.ones(self.wave.shape) * self.atmo_ex
+        return np.ones(self.wave.shape) #* self.atmo_ex
 
 
     def lya_abs(self, flux):
@@ -1431,6 +1432,19 @@ class Sim():
         self._spec.draw()
 
         
+    def spec_save(self, file):
+        wmin, wmax = np.min(self._spec.wave), np.max(self._spec.wave)
+        w = np.where(np.logical_and(self._spec.wavef.value > wmin.value, self._spec.wavef.value < wmax.value))
+        wavef = self._spec.wavef[w].to(au.Angstrom)
+        fluxf = cspline(self._spec.wave.to(au.Angstrom).value, 
+                        (self._spec.targ_raw.to(au.ph/au.Angstrom)/self._phot.texp/self._phot.area).value)(wavef.value)
+        t = Table([wavef, fluxf], 
+                  names=['wave','flux'])
+        comment = "l(A) photons/cm2/s/A\n%3.3f Vega_Vmag " % self._phot.targ_mag
+        t.meta['comments'] = [comment]
+        t.write(file, format='ascii.no_header', formats={'wave': '%2.4f', 'flux': '%2.12e'}, 
+                overwrite=True)  
+       
         
     def start(self):
         for k in self.__dict__:
