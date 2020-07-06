@@ -1046,7 +1046,7 @@ class PSF(object):
 
 class Spec(object):
 
-#    def __init__(self, phot, file=None, wmin=317.142*au.nm, wmax=378.268*au.nm,
+#    def __init__(self, phot, file=None, wmin=30.93*au.nm, wmax=338.67*au.nm,
     def __init__(self, phot, file=None, wmin=300*au.nm, wmax=410*au.nm,
                  dw=1e-3*au.nm, templ=spec_templ):
         self.phot = phot
@@ -1142,8 +1142,8 @@ class Spec(object):
         fig, self.ax = plt.subplots(figsize=(10,5))
         self.ax.set_title("Spectrum")
         self.ax.plot(self.wave, self.targ_raw, label='Target raw')
-        self.ax.plot(self.wave, self.targ_ext, label='Target extincted', linestyle='--', c='C0')
-        if bckg: self.ax.plot(self.wave, self.bckg_raw, label='Background (per arcsec2)')
+        #self.ax.plot(self.wave, self.targ_ext, label='Target extincted', linestyle='--', c='C0')
+        #if bckg: self.ax.plot(self.wave, self.bckg_raw, label='Background (per arcsec2)')
         
         self.ax.set_xlabel('Wavelength (%s)' % self.wave.unit)
         self.ax.set_ylabel('Flux density\n(%s)' % self.targ_raw.unit)
@@ -1440,7 +1440,7 @@ class Sim():
                         (self._spec.targ_raw.to(au.ph/au.Angstrom)/self._phot.texp/self._phot.area).value)(wavef.value)
         t = Table([wavef, fluxf], 
                   names=['wave','flux'])
-        comment = "l(A) photons/cm2/s/A\n%3.3f Vega_Vmag " % self._phot.targ_mag
+        comment = "l(A) photons/cm2/s/A, z = %3.4f\n%3.4f Vega_Vmag" % (qso_zem, self._phot.targ_mag)
         t.meta['comments'] = [comment]
         t.write(file, format='ascii.no_header', formats={'wave': '%2.4f', 'flux': '%2.12e'}, 
                 overwrite=True)  
