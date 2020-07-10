@@ -80,38 +80,62 @@ class CCD(object):
         #print(self.wmins_d)
         #print(self.wmaxs_d)
 
-        wmax = wave_d[0]+wave_d_shift
-        wmin = wmax-self.ysize*wave_sampl[0]
-        #print(wmin)
-        dw = np.full(int(self.ysize.value), 0.5*(wmin.value+wmax.value))
-        for j in range(10):
-            wmin2 = wmax.value-np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dw))
-            dw = np.linspace(wmin2, wmax.value, int(self.ysize.value))
-        wmin = wmin2*wmin.unit 
-        #print(wmin)
-            
-        self.wmins = np.array([wmin.to(au.nm).value])
-        self.wmaxs = np.array([wmax.to(au.nm).value])
-        self.wmins_d = np.array([wmin.to(au.nm).value])
-        self.wmaxs_d = np.array([wave_d[0].to(au.nm).value])
-        for i in range(len(wave_d)): 
-            wmin = wave_d[i]-wave_d_shift
-            wmax = wmin+self.ysize*wave_sampl[i+1]
-            #print(wmax)
+        if arm_n > 1:
+            wmax = wave_d[0]+wave_d_shift
+            wmin = wmax-self.ysize*wave_sampl[0]
+            #print(wmin)
             dw = np.full(int(self.ysize.value), 0.5*(wmin.value+wmax.value))
             for j in range(10):
-                wmax2 = wmin.value+np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dw))
-                dw = np.linspace(wmin.value, wmax2, int(self.ysize.value))
-            wmax = wmax2*wmax.unit
-            #print(wmax)
-           
-            self.wmins = np.append(self.wmins, wmin.to(au.nm).value)
-            self.wmaxs = np.append(self.wmaxs, wmax.to(au.nm).value)
-            self.wmins_d = np.append(self.wmins_d, wave_d[i].to(au.nm).value)
-            try:
-                self.wmaxs_d = np.append(self.wmaxs_d, wave_d[i+1].to(au.nm).value)
-            except:
-                self.wmaxs_d = np.append(self.wmaxs_d, wmax.to(au.nm).value)
+                wmin2 = wmax.value-np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dw))
+                dw = np.linspace(wmin2, wmax.value, int(self.ysize.value))
+            wmin = wmin2*wmin.unit 
+            #print(wmin)
+                
+            self.wmins = np.array([wmin.to(au.nm).value])
+            self.wmaxs = np.array([wmax.to(au.nm).value])
+            self.wmins_d = np.array([wmin.to(au.nm).value])
+            self.wmaxs_d = np.array([wave_d[0].to(au.nm).value])
+            for i in range(len(wave_d)): 
+                wmin = wave_d[i]-wave_d_shift
+                wmax = wmin+self.ysize*wave_sampl[i+1]
+                #print(wmax)
+                dw = np.full(int(self.ysize.value), 0.5*(wmin.value+wmax.value))
+                for j in range(10):
+                    wmax2 = wmin.value+np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dw))
+                    dw = np.linspace(wmin.value, wmax2, int(self.ysize.value))
+                wmax = wmax2*wmax.unit
+                #print(wmax)
+               
+                self.wmins = np.append(self.wmins, wmin.to(au.nm).value)
+                self.wmaxs = np.append(self.wmaxs, wmax.to(au.nm).value)
+                self.wmins_d = np.append(self.wmins_d, wave_d[i].to(au.nm).value)
+                try:
+                    self.wmaxs_d = np.append(self.wmaxs_d, wave_d[i+1].to(au.nm).value)
+                except:
+                    self.wmaxs_d = np.append(self.wmaxs_d, wmax.to(au.nm).value)
+        else:
+            wcen = 347.5*au.nm
+            wmin = wcen-self.ysize.value//2*self.ysize.unit*wave_sampl[0]
+            wmax = wcen+self.ysize.value//2*self.ysize.unit*wave_sampl[-1]
+            dwmin = np.full(int(self.ysize.value), wcen)
+            dwmax = np.full(int(self.ysize.value), wcen)
+            for j in range(10):
+                wmin2 = wcen.value-np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dwmin))/2
+                wmax2 = wcen.value+np.sum(cspline(disp_wave.value, disp_sampl*ccd_ybin)(dwmax))/2
+                dwmin = np.linspace(wmin2, wcen.value, int(self.ysize.value))
+                dwmax = np.linspace(wcen.value, wmax2, int(self.ysize.value))
+
+            wmin = wmin2*wmin.unit 
+            wmax = wmax2*wmax.unit 
+
+            #print(wmin)
+                
+            self.wmins = np.array([wmin.to(au.nm).value])
+            self.wmaxs = np.array([wmax.to(au.nm).value])
+            self.wmins_d = np.array([wmin.to(au.nm).value])
+            self.wmaxs_d = np.array([wmax.to(au.nm).value])
+
+
         self.wmins_d[0] = 200
         self.wmaxs_d[-1] = 500
         self.wmins = self.wmins * au.nm
@@ -611,8 +635,15 @@ class CCD(object):
         #print(len(self.spec.flux_extr))
         self.spec.flux_extr = self.spec.flux_extr * au.ph
         #flux_final = self.spec.flux_extr
-        self.spec.flux_final_tot = np.sum([np.sum(f)/len(f) * (M-m) 
-                                           for f, M, m in zip(self.spec.flux_extr.value, self.wmaxs.value, self.wmins.value)])
+        #print(self.spec.flux_extr.value, self.wmaxs.value, self.wmins.value)
+        if arm_n > 1:
+            self.spec.flux_final_tot = np.sum([np.sum(f)/len(f) * (M-m) for f, M, m 
+                                               in zip(self.spec.flux_extr.value, self.wmaxs.value, self.wmins.value)])
+        else:
+            self.spec.flux_final_tot = np.sum(self.spec.flux_extr.value)/len(self.spec.flux_extr.value) \
+                                              * (self.wmaxs.value-self.wmins.value)
+
+            
         self.spec.flux_final_tot = self.spec.flux_final_tot * au.ph
         """
         print("Flux extracted:                          ")
@@ -1198,8 +1229,13 @@ class Spec(object):
         for a in range(arm_n):
             line1, = self.ax.plot(self.arm_wave[a], self.arm_targ[a] \
                 * self.tot_eff(self.arm_wave[a], self.m_d[a], self.M_d[a]), c='C3')
-            line2 = self.ax.scatter(self.wave_extr[a,:], self.flux_extr[a,:], s=2, c='C0')
-            line3 = self.ax.scatter(self.wave_extr[a,:], self.err_extr[a,:], s=2, c='C1')
+            if arm_n > 1:
+                line2 = self.ax.scatter(self.wave_extr[a,:], self.flux_extr[a,:], s=2, c='C0')
+                line3 = self.ax.scatter(self.wave_extr[a,:], self.err_extr[a,:], s=2, c='C1')
+            else:
+                line2 = self.ax.scatter(self.wave_extr[:], self.flux_extr[:], s=2, c='C0')
+                line3 = self.ax.scatter(self.wave_extr[:], self.err_extr[:], s=2, c='C1')
+                
         line1.set_label('On detector')            
         line2.set_label('Extracted')
         line3.set_label('Extracted (error)')

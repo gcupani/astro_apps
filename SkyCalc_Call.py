@@ -98,7 +98,9 @@ with open('SkyCalc_input_NEW.txt', 'w') as fp2:
 fp2.close()
 
 # Call Skycalc
-os.system('~/.local/bin/skycalc_cli -i SkyCalc_input_NEW.txt -o SkyCalc_input_NEW_Out.fits')
+#os.system('~/.local/bin/skycalc_cli -i SkyCalc_input_NEW.txt -o SkyCalc_input_NEW_Out.fits')
+os.system('skycalc_cli -i SkyCalc_input_NEW.txt -o SkyCalc_input_NEW_Out.fits')
+
 
 
 # Load output file
