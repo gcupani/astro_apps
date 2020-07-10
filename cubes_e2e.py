@@ -1142,8 +1142,8 @@ class Spec(object):
         fig, self.ax = plt.subplots(figsize=(10,5))
         self.ax.set_title("Spectrum")
         self.ax.plot(self.wave, self.targ_raw, label='Target raw')
-        #self.ax.plot(self.wave, self.targ_ext, label='Target extincted', linestyle='--', c='C0')
-        #if bckg: self.ax.plot(self.wave, self.bckg_raw, label='Background (per arcsec2)')
+        self.ax.plot(self.wave, self.targ_ext, label='Target extincted', linestyle='--', c='C0')
+        if bckg: self.ax.plot(self.wave, self.bckg_raw, label='Background (per arcsec2)')
         
         self.ax.set_xlabel('Wavelength (%s)' % self.wave.unit)
         self.ax.set_ylabel('Flux density\n(%s)' % self.targ_raw.unit)
