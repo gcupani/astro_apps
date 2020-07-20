@@ -463,7 +463,7 @@ class CCD(object):
             self.ax_s[1].set_ylabel('Sampling (%s/%s)' % (au.nm, au.pixel))
             self.ax_s[2].plot(self.spec.arm_wave[i], self.spec.fwhm[i], label='Arm %i' % i, color='C0', alpha=1-i/arm_n)
             self.ax_s[2].set_xlabel('Wavelength (%s)' % au.nm)
-            self.ax_s[2].set_ylabel('FWHM (1/%s)' % au.pixel)
+            self.ax_s[2].set_ylabel('FWHM (%s)' % au.pixel)
         self.ax_s[2].axhline(2.0, linestyle=':')
         self.ax_s[2].text(np.min(self.spec.arm_wave[0]), 2.0, "Nyquist limit", ha='left', va='bottom')
         self.ax_s[2].legend()
@@ -754,6 +754,21 @@ class Photons(object):
         """
         self.wave_ref = globals()['wave_ref_'+mag_syst][mag_band]
         self.flux_ref = globals()['flux_ref_'+mag_syst][mag_band]
+        
+        try:
+            data_band = ascii.read('database/phot_%s.dat' % mag_band)
+            self.wave_band = data_band['col1'] * au.nm
+            if mag_band in ['J', 'H', 'K']:
+                self.wave_band = self.wave_band*1e3
+            self.dwave_band = self.wave_band[1]-self.wave_band[0]
+            self.flux_band = data_band['col2']
+            self.flux_band = self.flux_band/np.sum(self.flux_band)*self.dwave_band
+            #print(np.sum(self.flux_band))
+            #plt.plot(self.wave_band, self.flux_band)
+            #plt.show()
+        except:
+            pass
+        
 
         f = self.flux_ref * self.area * texp  # Flux density @ 555.6 nm, V = 0
         self.targ = f * pow(10, -0.4*self.targ_mag)
@@ -1115,8 +1130,6 @@ class Spec(object):
             print("Flat sky model created.")
 
 
-
-
         #print("Flux collected by the telescope:")
         #print(" from target: %2.3e %s" % (self.targ_tot.value, self.targ_tot.unit))
         #print(" from background: %2.3e %s" % (self.bckg_tot.value, self.bckg_tot.unit))
@@ -1134,9 +1147,17 @@ class Spec(object):
         setattr(self, obj+'_ext', ext)
         setattr(self, obj+'_tot', tot)
         #setattr(self, obj+'_norm', norm)
+        
+        """
+        band = np.where(np.logical_and(self.wave>np.min(self.phot.wave_band), self.wave<np.max(self.phot.wave_band)))
+        waveb = self.wave[band]
+        dwaveb = np.median(self.wave[1:]-self.wave[:-1])
+        fluxb = getattr(self, obj+'_raw')[band]
+        spl_band = cspline(self.phot.wave_band, self.phot.flux_band)(waveb)
+        print(obj, np.sum((spl_band*fluxb*dwaveb).value)/self.phot.area)
+        """
 
-
-    def custom(self):
+    def custom_old(self):
         name = self.file    
         try:
             data = Table(ascii.read(name, data_start=1, names=['col1', 'col2', 'col3', 'col4']))
@@ -1153,6 +1174,53 @@ class Spec(object):
         self.wavef = wavef
         spl = cspline(wavef, fluxf)(self.wave.value)
         spl = spl/cspline(wavef, fluxf)(self.phot.wave_ref)
+        flux = spl #* au.photon/au.nm
+        return flux #* self.atmo_ex
+
+    
+
+    def custom(self):
+        name = self.file    
+        try:
+            data = Table(ascii.read(name, data_start=1, names=['col1', 'col2', 'col3', 'col4']))
+            wavef = data['col1']*0.1 * au.nm
+            fluxf = data['col2']
+            
+        except:
+            data = Table(ascii.read(name, data_start=2, names=['col1', 'col2'], format='no_header')[2:], 
+                         dtype=(float, float))#name)
+            wavef = data['col1']*0.1 * au.nm
+            fluxf = data['col2']
+        if qso_zem != None:
+            wavef = wavef*(1+qso_zem)
+
+        band = np.where(np.logical_and(wavef>np.min(self.phot.wave_band), wavef<np.max(self.phot.wave_band)))
+        waveb = wavef[band]
+        dwaveb = np.median(wavef[1:]-wavef[:-1])
+        fluxb = fluxf[band]
+
+        spl_band = cspline(self.phot.wave_band, self.phot.flux_band)(waveb)    
+        #plt.plot(wavef[1:], wavef[1:]-wavef[:-1])
+        #print(-2.5*np.log10(np.sum((spl_band*fluxb*self.phot.dwave_band).value)))
+        #print(np.sum((spl_band*fluxb*dwaveb).value))
+
+
+            
+        self.wavef = wavef
+        spl = cspline(wavef, fluxf)(self.wave.value)
+        
+        
+        spl = spl/np.sum((spl_band*fluxb*dwaveb).value)
+        
+        """
+        band = np.where(np.logical_and(self.wave>np.min(self.phot.wave_band), self.wave<np.max(self.phot.wave_band)))
+        waveb = self.wave[band]
+        dwaveb = np.median(self.wave[1:]-self.wave[:-1])
+        splb = spl[band]
+        spl_band = cspline(self.phot.wave_band, self.phot.flux_band)(waveb)
+        print(np.sum(spl_band*splb*dwaveb)*self.phot.targ/self.phot.area)
+        """
+        
         flux = spl #* au.photon/au.nm
         return flux #* self.atmo_ex
 
@@ -1295,13 +1363,13 @@ class Spec(object):
         #print(np.exp(tau_norm*(1+z[z<qso_zem])**tau_index*1/den), corr)
         return flux * corr
 
-    
+    """
     def normalize(self, flux):
         self.norm = flux/np.sum(flux) / au.nm
         self.targ = flux * self.phot.targ
         self.targ_int = np.sum(self.targ)/len(self.targ.value) \
                         * (self.wmax-self.wmin)
-
+    """
         
     def PL(self, index=-1.5):
         return (self.wave.value/self.phot.wave_ref.value)**index * self.atmo_ex
